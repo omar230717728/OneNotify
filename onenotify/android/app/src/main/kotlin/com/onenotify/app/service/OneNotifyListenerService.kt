@@ -32,7 +32,8 @@ class OneNotifyListenerService : NotificationListenerService() {
         Log.d("OneNotifyEngine", "LOG 1: Intercepted notification from package: $packageName")
         
         // Filter: Discard anything not in the monitored_apps table early
-        if (!isPackageMonitored(packageName)) {
+        val status = getMonitoredStatus(packageName)
+        if (!status.isMonitored) {
             Log.d("OneNotifyEngine", "LOG 1: SKIPPED — package not in monitored_apps table: $packageName")
             return
         }
@@ -60,6 +61,16 @@ class OneNotifyListenerService : NotificationListenerService() {
 
         // Push to shared SQLite database
         insertNotificationToDb(packageName, title, text, timestamp)
+
+        // If Auto-Dismiss (Mute) is enabled for this tracked app, instantly cancel the notification from the Android status bar
+        if (status.isMuted) {
+            try {
+                cancelNotification(sbn.key)
+                Log.d("OneNotifyEngine", "LOG 1: AUTO-DISMISSED — wiped notification from status bar for muted package: $packageName")
+            } catch (e: Exception) {
+                Log.e("OneNotifyEngine", "Error cancelling notification for $packageName: ${e.message}")
+            }
+        }
     }
 
     private fun insertNotificationToDb(packageName: String, title: String, text: String, timestamp: Long) {
@@ -171,21 +182,32 @@ class OneNotifyListenerService : NotificationListenerService() {
         }
     }
 
-    private fun isPackageMonitored(packageName: String): Boolean {
+    data class MonitoredStatus(val isMonitored: Boolean, val isMuted: Boolean)
+
+    private fun getMonitoredStatus(packageName: String): MonitoredStatus {
         var db: SQLiteDatabase? = null
         var cursor: android.database.Cursor? = null
         try {
             val dbFile = File(applicationContext.filesDir, "onenotify.db")
-            if (!dbFile.exists()) return false
+            if (!dbFile.exists()) return MonitoredStatus(false, false)
             db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
-            cursor = db.rawQuery("SELECT 1 FROM monitored_apps WHERE package_name = ? LIMIT 1", arrayOf(packageName))
-            return cursor != null && cursor.moveToFirst()
+            cursor = db.rawQuery("SELECT is_muted FROM monitored_apps WHERE package_name = ? LIMIT 1", arrayOf(packageName))
+            if (cursor != null && cursor.moveToFirst()) {
+                val isMutedIndex = cursor.getColumnIndex("is_muted")
+                val isMuted = if (isMutedIndex != -1) cursor.getInt(isMutedIndex) == 1 else false
+                return MonitoredStatus(true, isMuted)
+            }
+            return MonitoredStatus(false, false)
         } catch (e: Exception) {
             Log.e("OneNotifyEngine", "Error checking monitored_apps for $packageName: ${e.message}")
-            return false
+            return MonitoredStatus(false, false)
         } finally {
             cursor?.close()
             db?.close()
         }
+    }
+
+    private fun isPackageMonitored(packageName: String): Boolean {
+        return getMonitoredStatus(packageName).isMonitored
     }
 }

@@ -426,8 +426,23 @@ class $MonitoredAppsTable extends MonitoredApps
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _isMutedMeta = const VerificationMeta(
+    'isMuted',
+  );
   @override
-  List<GeneratedColumn> get $columns => [packageName];
+  late final GeneratedColumn<bool> isMuted = GeneratedColumn<bool>(
+    'is_muted',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_muted" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [packageName, isMuted];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -451,6 +466,12 @@ class $MonitoredAppsTable extends MonitoredApps
     } else if (isInserting) {
       context.missing(_packageNameMeta);
     }
+    if (data.containsKey('is_muted')) {
+      context.handle(
+        _isMutedMeta,
+        isMuted.isAcceptableOrUnknown(data['is_muted']!, _isMutedMeta),
+      );
+    }
     return context;
   }
 
@@ -464,6 +485,10 @@ class $MonitoredAppsTable extends MonitoredApps
         DriftSqlType.string,
         data['${effectivePrefix}package_name'],
       )!,
+      isMuted: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_muted'],
+      )!,
     );
   }
 
@@ -475,16 +500,21 @@ class $MonitoredAppsTable extends MonitoredApps
 
 class DbMonitoredApp extends DataClass implements Insertable<DbMonitoredApp> {
   final String packageName;
-  const DbMonitoredApp({required this.packageName});
+  final bool isMuted;
+  const DbMonitoredApp({required this.packageName, required this.isMuted});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['package_name'] = Variable<String>(packageName);
+    map['is_muted'] = Variable<bool>(isMuted);
     return map;
   }
 
   MonitoredAppsCompanion toCompanion(bool nullToAbsent) {
-    return MonitoredAppsCompanion(packageName: Value(packageName));
+    return MonitoredAppsCompanion(
+      packageName: Value(packageName),
+      isMuted: Value(isMuted),
+    );
   }
 
   factory DbMonitoredApp.fromJson(
@@ -494,6 +524,7 @@ class DbMonitoredApp extends DataClass implements Insertable<DbMonitoredApp> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return DbMonitoredApp(
       packageName: serializer.fromJson<String>(json['packageName']),
+      isMuted: serializer.fromJson<bool>(json['isMuted']),
     );
   }
   @override
@@ -501,62 +532,77 @@ class DbMonitoredApp extends DataClass implements Insertable<DbMonitoredApp> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'packageName': serializer.toJson<String>(packageName),
+      'isMuted': serializer.toJson<bool>(isMuted),
     };
   }
 
-  DbMonitoredApp copyWith({String? packageName}) =>
-      DbMonitoredApp(packageName: packageName ?? this.packageName);
+  DbMonitoredApp copyWith({String? packageName, bool? isMuted}) =>
+      DbMonitoredApp(
+        packageName: packageName ?? this.packageName,
+        isMuted: isMuted ?? this.isMuted,
+      );
   DbMonitoredApp copyWithCompanion(MonitoredAppsCompanion data) {
     return DbMonitoredApp(
       packageName: data.packageName.present
           ? data.packageName.value
           : this.packageName,
+      isMuted: data.isMuted.present ? data.isMuted.value : this.isMuted,
     );
   }
 
   @override
   String toString() {
     return (StringBuffer('DbMonitoredApp(')
-          ..write('packageName: $packageName')
+          ..write('packageName: $packageName, ')
+          ..write('isMuted: $isMuted')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => packageName.hashCode;
+  int get hashCode => Object.hash(packageName, isMuted);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is DbMonitoredApp && other.packageName == this.packageName);
+      (other is DbMonitoredApp &&
+          other.packageName == this.packageName &&
+          other.isMuted == this.isMuted);
 }
 
 class MonitoredAppsCompanion extends UpdateCompanion<DbMonitoredApp> {
   final Value<String> packageName;
+  final Value<bool> isMuted;
   final Value<int> rowid;
   const MonitoredAppsCompanion({
     this.packageName = const Value.absent(),
+    this.isMuted = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MonitoredAppsCompanion.insert({
     required String packageName,
+    this.isMuted = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : packageName = Value(packageName);
   static Insertable<DbMonitoredApp> custom({
     Expression<String>? packageName,
+    Expression<bool>? isMuted,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (packageName != null) 'package_name': packageName,
+      if (isMuted != null) 'is_muted': isMuted,
       if (rowid != null) 'rowid': rowid,
     });
   }
 
   MonitoredAppsCompanion copyWith({
     Value<String>? packageName,
+    Value<bool>? isMuted,
     Value<int>? rowid,
   }) {
     return MonitoredAppsCompanion(
       packageName: packageName ?? this.packageName,
+      isMuted: isMuted ?? this.isMuted,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -566,6 +612,9 @@ class MonitoredAppsCompanion extends UpdateCompanion<DbMonitoredApp> {
     final map = <String, Expression>{};
     if (packageName.present) {
       map['package_name'] = Variable<String>(packageName.value);
+    }
+    if (isMuted.present) {
+      map['is_muted'] = Variable<bool>(isMuted.value);
     }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
@@ -577,6 +626,7 @@ class MonitoredAppsCompanion extends UpdateCompanion<DbMonitoredApp> {
   String toString() {
     return (StringBuffer('MonitoredAppsCompanion(')
           ..write('packageName: $packageName, ')
+          ..write('isMuted: $isMuted, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -816,11 +866,13 @@ typedef $$NotificationsTableProcessedTableManager =
 typedef $$MonitoredAppsTableCreateCompanionBuilder =
     MonitoredAppsCompanion Function({
       required String packageName,
+      Value<bool> isMuted,
       Value<int> rowid,
     });
 typedef $$MonitoredAppsTableUpdateCompanionBuilder =
     MonitoredAppsCompanion Function({
       Value<String> packageName,
+      Value<bool> isMuted,
       Value<int> rowid,
     });
 
@@ -835,6 +887,11 @@ class $$MonitoredAppsTableFilterComposer
   });
   ColumnFilters<String> get packageName => $composableBuilder(
     column: $table.packageName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isMuted => $composableBuilder(
+    column: $table.isMuted,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -852,6 +909,11 @@ class $$MonitoredAppsTableOrderingComposer
     column: $table.packageName,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get isMuted => $composableBuilder(
+    column: $table.isMuted,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$MonitoredAppsTableAnnotationComposer
@@ -867,6 +929,9 @@ class $$MonitoredAppsTableAnnotationComposer
     column: $table.packageName,
     builder: (column) => column,
   );
+
+  GeneratedColumn<bool> get isMuted =>
+      $composableBuilder(column: $table.isMuted, builder: (column) => column);
 }
 
 class $$MonitoredAppsTableTableManager
@@ -901,17 +966,21 @@ class $$MonitoredAppsTableTableManager
           updateCompanionCallback:
               ({
                 Value<String> packageName = const Value.absent(),
+                Value<bool> isMuted = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MonitoredAppsCompanion(
                 packageName: packageName,
+                isMuted: isMuted,
                 rowid: rowid,
               ),
           createCompanionCallback:
               ({
                 required String packageName,
+                Value<bool> isMuted = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MonitoredAppsCompanion.insert(
                 packageName: packageName,
+                isMuted: isMuted,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

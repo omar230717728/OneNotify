@@ -19,6 +19,7 @@ class Notifications extends Table {
 @DataClassName('DbMonitoredApp')
 class MonitoredApps extends Table {
   TextColumn get packageName => text()();
+  BoolColumn get isMuted => boolean().withDefault(const Constant(true))();
   @override
   Set<Column> get primaryKey => {packageName};
 }
@@ -28,7 +29,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -44,7 +45,7 @@ class AppDatabase extends _$AppDatabase {
             'com.google.android.googlequicksearchbox'
           ]) {
             await customInsert(
-                'INSERT OR IGNORE INTO monitored_apps (package_name) VALUES (?)',
+                'INSERT OR IGNORE INTO monitored_apps (package_name, is_muted) VALUES (?, 1)',
                 variables: [Variable.withString(pkg)]);
           }
         },
@@ -61,9 +62,12 @@ class AppDatabase extends _$AppDatabase {
               'com.google.android.googlequicksearchbox'
             ]) {
               await customInsert(
-                  'INSERT OR IGNORE INTO monitored_apps (package_name) VALUES (?)',
+                  'INSERT OR IGNORE INTO monitored_apps (package_name, is_muted) VALUES (?, 1)',
                   variables: [Variable.withString(pkg)]);
             }
+          }
+          if (from < 3) {
+            await m.addColumn(monitoredApps, monitoredApps.isMuted);
           }
         },
         beforeOpen: (details) async {
@@ -97,6 +101,13 @@ class AppDatabase extends _$AppDatabase {
     return select(monitoredApps).watch().map((list) => list.map((e) => e.packageName).toSet());
   }
 
+  // Expose a reactive stream of all monitored apps mapped by package name
+  Stream<Map<String, DbMonitoredApp>> watchMonitoredAppsMap() {
+    return select(monitoredApps).watch().map((list) {
+      return {for (var app in list) app.packageName: app};
+    });
+  }
+
   // Get current count of monitored apps (to check onboarding completion)
   Future<int> getMonitoredAppsCount() async {
     final list = await select(monitoredApps).get();
@@ -106,9 +117,18 @@ class AppDatabase extends _$AppDatabase {
   // Add a package to monitored_apps
   Future<int> addMonitoredPackage(String packageName) {
     return into(monitoredApps).insert(
-      MonitoredAppsCompanion.insert(packageName: packageName),
+      MonitoredAppsCompanion.insert(
+        packageName: packageName,
+        isMuted: const Value(true),
+      ),
       mode: InsertMode.insertOrIgnore,
     );
+  }
+
+  // Update mute state for a specific monitored package
+  Future<int> setPackageMuted(String packageName, bool isMuted) {
+    return (update(monitoredApps)..where((t) => t.packageName.equals(packageName)))
+        .write(MonitoredAppsCompanion(isMuted: Value(isMuted)));
   }
 
   // Remove a package from monitored_apps

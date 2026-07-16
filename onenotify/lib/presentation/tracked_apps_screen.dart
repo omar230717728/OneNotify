@@ -38,7 +38,7 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> {
     try {
       // Fetch user-installed apps with icons, excluding system background noise
       final apps = await FlutterDeviceApps.listApps(
-        includeSystem: false,
+        includeSystem: true,
         onlyLaunchable: true,
         includeIcons: true,
       );
@@ -151,10 +151,10 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> {
 
             // Monitored Apps Stream & List synchronized with Drift SQLite table
             Expanded(
-              child: StreamBuilder<Set<String>>(
-                stream: widget.database.watchAllMonitoredPackages(),
+              child: StreamBuilder<Map<String, DbMonitoredApp>>(
+                stream: widget.database.watchMonitoredAppsMap(),
                 builder: (context, snapshot) {
-                  final monitoredSet = snapshot.data ?? {};
+                  final monitoredMap = snapshot.data ?? {};
 
                   if (_isLoading) {
                     return const Center(
@@ -179,7 +179,9 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> {
                       final app = filteredApps[index];
                       final pkg = app.packageName ?? '';
                       final name = app.appName ?? 'Unknown';
-                      final isMonitored = monitoredSet.contains(pkg);
+                      final monitoredApp = monitoredMap[pkg];
+                      final isMonitored = monitoredApp != null;
+                      final isMuted = monitoredApp?.isMuted ?? false;
 
                       return Container(
                         margin: const EdgeInsets.only(bottom: 10),
@@ -230,17 +232,44 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          trailing: Switch.adaptive(
-                            value: isMonitored,
-                            activeTrackColor: primaryColor,
-                            onChanged: (value) async {
-                              if (value) {
-                                await widget.database.addMonitoredPackage(pkg);
-                              } else {
-                                await widget.database.removeMonitoredPackage(pkg);
-                              }
-                              widget.onAppToggled?.call();
-                            },
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (isMonitored)
+                                IconButton(
+                                  tooltip: isMuted ? 'Auto-Dismiss ON (Wiped from Android status bar)' : 'Auto-Dismiss OFF (Normal status bar alerts)',
+                                  icon: Container(
+                                    padding: const EdgeInsets.all(7),
+                                    decoration: BoxDecoration(
+                                      color: isMuted ? Colors.amber[700]!.withValues(alpha: 0.2) : surfaceColor,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: isMuted ? Colors.amber[600]! : Colors.grey[800]!,
+                                      ),
+                                    ),
+                                    child: Icon(
+                                      isMuted ? Icons.notifications_off_rounded : Icons.notifications_active_rounded,
+                                      color: isMuted ? Colors.amber[400] : Colors.grey[400],
+                                      size: 18,
+                                    ),
+                                  ),
+                                  onPressed: () async {
+                                    await widget.database.setPackageMuted(pkg, !isMuted);
+                                  },
+                                ),
+                              Switch.adaptive(
+                                value: isMonitored,
+                                activeTrackColor: primaryColor,
+                                onChanged: (value) async {
+                                  if (value) {
+                                    await widget.database.addMonitoredPackage(pkg);
+                                  } else {
+                                    await widget.database.removeMonitoredPackage(pkg);
+                                  }
+                                  widget.onAppToggled?.call();
+                                },
+                              ),
+                            ],
                           ),
                         ),
                       );
