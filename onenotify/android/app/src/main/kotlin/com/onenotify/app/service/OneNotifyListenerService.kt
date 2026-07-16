@@ -11,14 +11,6 @@ import java.io.File
 
 class OneNotifyListenerService : NotificationListenerService() {
 
-    // Whitelist of packages allowed to be intercepted
-    private val allowedPackages = setOf(
-        "com.whatsapp",
-        "org.telegram.messenger",
-        "com.google.android.gm",
-        "com.microsoft.office.outlook"
-    )
-
     override fun onListenerConnected() {
         super.onListenerConnected()
         Log.d("OneNotifyEngine", "LOG 0: OneNotifyListenerService connected and active")
@@ -39,15 +31,29 @@ class OneNotifyListenerService : NotificationListenerService() {
         // Log 1: Notification captured
         Log.d("OneNotifyEngine", "LOG 1: Intercepted notification from package: $packageName")
         
-        // Filter: Discard anything not in the whitelist early
-        if (!allowedPackages.contains(packageName)) {
-            Log.d("OneNotifyEngine", "LOG 1: SKIPPED — package not in whitelist: $packageName")
+        // Filter: Discard anything not in the monitored_apps table early
+        if (!isPackageMonitored(packageName)) {
+            Log.d("OneNotifyEngine", "LOG 1: SKIPPED — package not in monitored_apps table: $packageName")
             return
         }
 
         val extras = sbn.notification?.extras
         val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
-        val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+        
+        // Extract the most detailed text (supporting InboxStyle EXTRA_TEXT_LINES and BigTextStyle)
+        var text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+        val textLines = extras?.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+        if (!textLines.isNullOrEmpty()) {
+            val linesString = textLines.joinToString("\n") { it.toString() }
+            if (linesString.isNotBlank()) {
+                text = linesString
+            }
+        } else {
+            val bigText = extras?.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+            if (!bigText.isNullOrBlank() && bigText != text) {
+                text = bigText
+            }
+        }
         val timestamp = sbn.postTime
 
         Log.d("OneNotifyEngine", "LOG 1: Allowed notification — title='$title', text='$text', timestamp=$timestamp")
@@ -105,6 +111,26 @@ class OneNotifyListenerService : NotificationListenerService() {
                 put("timestamp", timestamp)
             }
 
+            // Deduplication check: skip if the most recent record for this package has identical title and message
+            try {
+                val checkCursor = db.rawQuery(
+                    "SELECT title, message FROM notifications WHERE package_name = ? ORDER BY timestamp DESC LIMIT 1",
+                    arrayOf(packageName)
+                )
+                if (checkCursor.moveToFirst()) {
+                    val lastTitle = checkCursor.getString(0) ?: ""
+                    val lastMessage = checkCursor.getString(1) ?: ""
+                    if (lastTitle == title && lastMessage == text) {
+                        checkCursor.close()
+                        Log.d("OneNotifyEngine", "LOG 2: SKIPPED duplicate notification insertion for $packageName (title='$title')")
+                        return
+                    }
+                }
+                checkCursor.close()
+            } catch (e: Exception) {
+                // Safe fallthrough if table is empty or check fails
+            }
+
             // Using insertOrThrow to catch detailed constraint/syntax errors in our try-catch block
             val rowId = db.insertOrThrow("notifications", null, values)
             Log.d("OneNotifyEngine", "LOG 2: Successfully wrote notification to SQLite. Row ID: $rowId")
@@ -141,6 +167,24 @@ class OneNotifyListenerService : NotificationListenerService() {
         } catch (e: Exception) {
             Log.e("OneNotifyEngine", "LOG 2 ERROR: Exception in background writer: ${e.message}", e)
         } finally {
+            db?.close()
+        }
+    }
+
+    private fun isPackageMonitored(packageName: String): Boolean {
+        var db: SQLiteDatabase? = null
+        var cursor: android.database.Cursor? = null
+        try {
+            val dbFile = File(applicationContext.filesDir, "onenotify.db")
+            if (!dbFile.exists()) return false
+            db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+            cursor = db.rawQuery("SELECT 1 FROM monitored_apps WHERE package_name = ? LIMIT 1", arrayOf(packageName))
+            return cursor != null && cursor.moveToFirst()
+        } catch (e: Exception) {
+            Log.e("OneNotifyEngine", "Error checking monitored_apps for $packageName: ${e.message}")
+            return false
+        } finally {
+            cursor?.close()
             db?.close()
         }
     }

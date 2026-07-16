@@ -1,12 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <queries>
-        <package android:name="com.whatsapp" />
-        <package android:name="org.telegram.messenger" />
-        <package android:name="com.google.android.gm" />
-        <package android:name="com.microsoft.office.outlook" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

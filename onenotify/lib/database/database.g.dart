@@ -409,15 +409,193 @@ class NotificationsCompanion extends UpdateCompanion<DbNotification> {
   }
 }
 
+class $MonitoredAppsTable extends MonitoredApps
+    with TableInfo<$MonitoredAppsTable, DbMonitoredApp> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $MonitoredAppsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _packageNameMeta = const VerificationMeta(
+    'packageName',
+  );
+  @override
+  late final GeneratedColumn<String> packageName = GeneratedColumn<String>(
+    'package_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [packageName];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'monitored_apps';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<DbMonitoredApp> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('package_name')) {
+      context.handle(
+        _packageNameMeta,
+        packageName.isAcceptableOrUnknown(
+          data['package_name']!,
+          _packageNameMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_packageNameMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {packageName};
+  @override
+  DbMonitoredApp map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return DbMonitoredApp(
+      packageName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}package_name'],
+      )!,
+    );
+  }
+
+  @override
+  $MonitoredAppsTable createAlias(String alias) {
+    return $MonitoredAppsTable(attachedDatabase, alias);
+  }
+}
+
+class DbMonitoredApp extends DataClass implements Insertable<DbMonitoredApp> {
+  final String packageName;
+  const DbMonitoredApp({required this.packageName});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['package_name'] = Variable<String>(packageName);
+    return map;
+  }
+
+  MonitoredAppsCompanion toCompanion(bool nullToAbsent) {
+    return MonitoredAppsCompanion(packageName: Value(packageName));
+  }
+
+  factory DbMonitoredApp.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return DbMonitoredApp(
+      packageName: serializer.fromJson<String>(json['packageName']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'packageName': serializer.toJson<String>(packageName),
+    };
+  }
+
+  DbMonitoredApp copyWith({String? packageName}) =>
+      DbMonitoredApp(packageName: packageName ?? this.packageName);
+  DbMonitoredApp copyWithCompanion(MonitoredAppsCompanion data) {
+    return DbMonitoredApp(
+      packageName: data.packageName.present
+          ? data.packageName.value
+          : this.packageName,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DbMonitoredApp(')
+          ..write('packageName: $packageName')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => packageName.hashCode;
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is DbMonitoredApp && other.packageName == this.packageName);
+}
+
+class MonitoredAppsCompanion extends UpdateCompanion<DbMonitoredApp> {
+  final Value<String> packageName;
+  final Value<int> rowid;
+  const MonitoredAppsCompanion({
+    this.packageName = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  MonitoredAppsCompanion.insert({
+    required String packageName,
+    this.rowid = const Value.absent(),
+  }) : packageName = Value(packageName);
+  static Insertable<DbMonitoredApp> custom({
+    Expression<String>? packageName,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (packageName != null) 'package_name': packageName,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  MonitoredAppsCompanion copyWith({
+    Value<String>? packageName,
+    Value<int>? rowid,
+  }) {
+    return MonitoredAppsCompanion(
+      packageName: packageName ?? this.packageName,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (packageName.present) {
+      map['package_name'] = Variable<String>(packageName.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MonitoredAppsCompanion(')
+          ..write('packageName: $packageName, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $NotificationsTable notifications = $NotificationsTable(this);
+  late final $MonitoredAppsTable monitoredApps = $MonitoredAppsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities => [notifications];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+    notifications,
+    monitoredApps,
+  ];
 }
 
 typedef $$NotificationsTableCreateCompanionBuilder =
@@ -635,10 +813,138 @@ typedef $$NotificationsTableProcessedTableManager =
       DbNotification,
       PrefetchHooks Function()
     >;
+typedef $$MonitoredAppsTableCreateCompanionBuilder =
+    MonitoredAppsCompanion Function({
+      required String packageName,
+      Value<int> rowid,
+    });
+typedef $$MonitoredAppsTableUpdateCompanionBuilder =
+    MonitoredAppsCompanion Function({
+      Value<String> packageName,
+      Value<int> rowid,
+    });
+
+class $$MonitoredAppsTableFilterComposer
+    extends Composer<_$AppDatabase, $MonitoredAppsTable> {
+  $$MonitoredAppsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get packageName => $composableBuilder(
+    column: $table.packageName,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$MonitoredAppsTableOrderingComposer
+    extends Composer<_$AppDatabase, $MonitoredAppsTable> {
+  $$MonitoredAppsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get packageName => $composableBuilder(
+    column: $table.packageName,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$MonitoredAppsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $MonitoredAppsTable> {
+  $$MonitoredAppsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get packageName => $composableBuilder(
+    column: $table.packageName,
+    builder: (column) => column,
+  );
+}
+
+class $$MonitoredAppsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $MonitoredAppsTable,
+          DbMonitoredApp,
+          $$MonitoredAppsTableFilterComposer,
+          $$MonitoredAppsTableOrderingComposer,
+          $$MonitoredAppsTableAnnotationComposer,
+          $$MonitoredAppsTableCreateCompanionBuilder,
+          $$MonitoredAppsTableUpdateCompanionBuilder,
+          (
+            DbMonitoredApp,
+            BaseReferences<_$AppDatabase, $MonitoredAppsTable, DbMonitoredApp>,
+          ),
+          DbMonitoredApp,
+          PrefetchHooks Function()
+        > {
+  $$MonitoredAppsTableTableManager(_$AppDatabase db, $MonitoredAppsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$MonitoredAppsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$MonitoredAppsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$MonitoredAppsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> packageName = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => MonitoredAppsCompanion(
+                packageName: packageName,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String packageName,
+                Value<int> rowid = const Value.absent(),
+              }) => MonitoredAppsCompanion.insert(
+                packageName: packageName,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$MonitoredAppsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $MonitoredAppsTable,
+      DbMonitoredApp,
+      $$MonitoredAppsTableFilterComposer,
+      $$MonitoredAppsTableOrderingComposer,
+      $$MonitoredAppsTableAnnotationComposer,
+      $$MonitoredAppsTableCreateCompanionBuilder,
+      $$MonitoredAppsTableUpdateCompanionBuilder,
+      (
+        DbMonitoredApp,
+        BaseReferences<_$AppDatabase, $MonitoredAppsTable, DbMonitoredApp>,
+      ),
+      DbMonitoredApp,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
   $AppDatabaseManager(this._db);
   $$NotificationsTableTableManager get notifications =>
       $$NotificationsTableTableManager(_db, _db.notifications);
+  $$MonitoredAppsTableTableManager get monitoredApps =>
+      $$MonitoredAppsTableTableManager(_db, _db.monitoredApps);
 }

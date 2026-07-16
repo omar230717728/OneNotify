@@ -7,6 +7,9 @@ import android.util.Log
 import com.onenotify.app.SyncBus
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import android.content.ComponentName
+import android.content.Intent
+import android.provider.Settings
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
@@ -18,6 +21,42 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
         Log.d("OneNotifyEngine", "LOG 4: MethodChannel registered: $channelName")
+        
+        methodChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isListenerPermissionGranted" -> {
+                    val enabledListeners = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+                    val myComponent = ComponentName(this, com.onenotify.app.service.OneNotifyListenerService::class.java).flattenToString()
+                    val isGranted = enabledListeners != null && (enabledListeners.contains(myComponent) || enabledListeners.contains(packageName))
+                    result.success(isGranted)
+                }
+                "requestListenerPermission" -> {
+                    try {
+                        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e("OneNotifyEngine", "Failed to open Notification Listener settings: ", e)
+                        result.error("OPEN_SETTINGS_FAILED", e.message, null)
+                    }
+                }
+                "requestRebindService" -> {
+                    try {
+                        val componentName = ComponentName(this, com.onenotify.app.service.OneNotifyListenerService::class.java)
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                            android.service.notification.NotificationListenerService.requestRebind(componentName)
+                            Log.d("OneNotifyEngine", "Requested NotificationListenerService rebind.")
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e("OneNotifyEngine", "Failed to request rebind: ", e)
+                        result.success(false)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

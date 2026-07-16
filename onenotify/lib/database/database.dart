@@ -16,15 +16,56 @@ class Notifications extends Table {
   Int64Column get timestamp => int64()();
 }
 
-@DriftDatabase(tables: [Notifications])
+@DataClassName('DbMonitoredApp')
+class MonitoredApps extends Table {
+  TextColumn get packageName => text()();
+  @override
+  Set<Column> get primaryKey => {packageName};
+}
+
+@DriftDatabase(tables: [Notifications, MonitoredApps])
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (Migrator m) async {
+          await m.createAll();
+          // Pre-seed default popular apps into monitored_apps so new installations immediately track top apps if installed
+          for (final pkg in [
+            'com.whatsapp',
+            'org.telegram.messenger',
+            'com.google.android.gm',
+            'com.microsoft.office.outlook',
+            'com.google.android.youtube',
+            'com.google.android.googlequicksearchbox'
+          ]) {
+            await customInsert(
+                'INSERT OR IGNORE INTO monitored_apps (package_name) VALUES (?)',
+                variables: [Variable.withString(pkg)]);
+          }
+        },
+        onUpgrade: (Migrator m, int from, int to) async {
+          if (from < 2) {
+            await m.createTable(monitoredApps);
+            // Pre-seed existing whitelisted packages during upgrade from v1 -> v2
+            for (final pkg in [
+              'com.whatsapp',
+              'org.telegram.messenger',
+              'com.google.android.gm',
+              'com.microsoft.office.outlook',
+              'com.google.android.youtube',
+              'com.google.android.googlequicksearchbox'
+            ]) {
+              await customInsert(
+                  'INSERT OR IGNORE INTO monitored_apps (package_name) VALUES (?)',
+                  variables: [Variable.withString(pkg)]);
+            }
+          }
+        },
         beforeOpen: (details) async {
           // Enable foreign key constraints
           await customStatement('PRAGMA foreign_keys = ON;');
@@ -43,6 +84,36 @@ class AppDatabase extends _$AppDatabase {
             (t) => OrderingTerm(expression: t.timestamp, mode: OrderingMode.desc)
           ]))
         .watch();
+  }
+
+  // Delete a specific notification by ID from the Drift database
+  Future<int> deleteNotificationById(int id) {
+    print("PURGE_PIPELINE: Executing DELETE for notification id=$id");
+    return (delete(notifications)..where((t) => t.id.equals(id))).go();
+  }
+
+  // Expose a reactive stream of all monitored package names as a Set
+  Stream<Set<String>> watchAllMonitoredPackages() {
+    return select(monitoredApps).watch().map((list) => list.map((e) => e.packageName).toSet());
+  }
+
+  // Get current count of monitored apps (to check onboarding completion)
+  Future<int> getMonitoredAppsCount() async {
+    final list = await select(monitoredApps).get();
+    return list.length;
+  }
+
+  // Add a package to monitored_apps
+  Future<int> addMonitoredPackage(String packageName) {
+    return into(monitoredApps).insert(
+      MonitoredAppsCompanion.insert(packageName: packageName),
+      mode: InsertMode.insertOrIgnore,
+    );
+  }
+
+  // Remove a package from monitored_apps
+  Future<int> removeMonitoredPackage(String packageName) {
+    return (delete(monitoredApps)..where((t) => t.packageName.equals(packageName))).go();
   }
 }
 

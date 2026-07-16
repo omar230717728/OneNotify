@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:onenotify/database/database.dart';
-import 'package:onenotify/presentation/notification_timeline_screen.dart';
+import 'package:onenotify/presentation/main_navigation_holder.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,7 +22,7 @@ class MyApp extends StatelessWidget {
         brightness: Brightness.dark,
         useMaterial3: true,
       ),
-      home: NotificationTimelineScreen(database: database),
+      home: MainNavigationHolder(database: database),
     );
   }
 }

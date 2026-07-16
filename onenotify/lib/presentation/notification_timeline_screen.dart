@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:onenotify/database/database.dart';
+import 'package:flutter_device_apps/flutter_device_apps.dart';
+import 'package:onenotify/presentation/onboarding_permission_screen.dart';
 
 class NotificationTimelineScreen extends StatefulWidget {
   final AppDatabase database;
@@ -18,6 +20,30 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
   late Stream<List<DbNotification>> _notificationStream;
 
   static const _syncChannel = MethodChannel('com.example.onenotify/sync');
+  bool _hasNotificationAccess = true;
+  final Set<String> _expandedPackages = {};
+  final Map<String, Uint8List?> _appIconsCache = {};
+  final Set<String> _loadingIcons = {};
+
+  void _ensureAppIconsLoaded(List<String> packages) {
+    for (final pkg in packages) {
+      if (!_appIconsCache.containsKey(pkg) && !_loadingIcons.contains(pkg)) {
+        _loadingIcons.add(pkg);
+        FlutterDeviceApps.getApp(pkg, includeIcon: true).then((appInfo) {
+          if (mounted) {
+            setState(() {
+              _appIconsCache[pkg] = appInfo?.iconBytes;
+              _loadingIcons.remove(pkg);
+            });
+          }
+        }).catchError((e) {
+          if (mounted) {
+            _loadingIcons.remove(pkg);
+          }
+        });
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -44,9 +70,10 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
       }
     });
 
-    // Initial data load
+    // Initial data load and permission check
     print("LOG 6: Calling initial _triggerDriftRefresh()");
     _triggerDriftRefresh();
+    _checkNotificationAccess();
   }
 
   @override
@@ -64,6 +91,24 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
     if (state == AppLifecycleState.resumed) {
       print("LOG 6: App RESUMED — calling _triggerDriftRefresh()");
       _triggerDriftRefresh();
+      _checkNotificationAccess();
+    }
+  }
+
+  Future<void> _checkNotificationAccess() async {
+    try {
+      final isGranted = await _syncChannel.invokeMethod<bool>('isListenerPermissionGranted') ?? false;
+      if (mounted && _hasNotificationAccess != isGranted) {
+        setState(() {
+          _hasNotificationAccess = isGranted;
+        });
+      }
+      if (isGranted) {
+        // Also request rebind so Android activates our background listener immediately on new phones
+        await _syncChannel.invokeMethod('requestRebindService');
+      }
+    } catch (e) {
+      // Safe fallback if channel is unavailable
     }
   }
 
@@ -128,6 +173,18 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
         'color': const Color(0xFF0078D4),
         'icon': Icons.work_outline,
       };
+    } else if (packageName.contains('youtube')) {
+      return {
+        'name': 'YouTube',
+        'color': const Color(0xFFFF0000),
+        'icon': Icons.play_circle_fill_rounded,
+      };
+    } else if (packageName.contains('googlequicksearchbox') || (packageName.contains('android.google') && !packageName.contains('gm'))) {
+      return {
+        'name': 'Google',
+        'color': const Color(0xFF4285F4),
+        'icon': Icons.search_rounded,
+      };
     } else {
       return {
         'name': 'App',
@@ -160,6 +217,17 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (!_hasNotificationAccess) {
+      return OnboardingPermissionScreen(
+        onGrantPressed: () async {
+          await _syncChannel.invokeMethod('requestListenerPermission');
+        },
+        onCheckAgain: () async {
+          await _checkNotificationAccess();
+        },
+      );
+    }
+
     // Curated Midnight UI Color Palette
     const backgroundColor = Color(0xFF0B0F19);
     const surfaceColor = Color(0xFF161E2E);
@@ -246,7 +314,7 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
               child: Divider(color: Colors.grey[900], height: 1),
             ),
 
-            // Reactive Notification Stream
+            // Reactive Notification Stream with In-Memory Grouping
             Expanded(
               child: StreamBuilder<List<DbNotification>>(
                 stream: _notificationStream,
@@ -261,11 +329,10 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                     );
                   }
 
-                  final list = snapshot.data ?? [];
+                  final notifications = snapshot.data ?? [];
 
-                  if (list.isEmpty) {
+                  if (notifications.isEmpty) {
                     // Modern styled empty state wrapped in RefreshIndicator and SingleChildScrollView
-                    // to allow pull-to-refresh even when the database is empty.
                     return RefreshIndicator(
                       onRefresh: _handleRefresh,
                       color: Colors.white,
@@ -318,6 +385,15 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                     );
                   }
 
+                  // 1. In-Memory Grouping (Dart) by packageName
+                  final Map<String, List<DbNotification>> groupedNotifications = {};
+                  for (var notification in notifications) {
+                    groupedNotifications.putIfAbsent(notification.packageName, () => []).add(notification);
+                  }
+                  final packageNames = groupedNotifications.keys.toList();
+                  _ensureAppIconsLoaded(packageNames);
+
+                  // 2. Hierarchical Accordion UI with Swipe-To-Dismiss
                   return RefreshIndicator(
                     onRefresh: _handleRefresh,
                     color: Colors.white,
@@ -327,106 +403,263 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                       physics: const AlwaysScrollableScrollPhysics(
                         parent: BouncingScrollPhysics(),
                       ),
-                      itemCount: list.length,
+                      itemCount: packageNames.length,
                       itemBuilder: (context, index) {
-                        final item = list[index];
-                        final meta = _getAppMeta(item.packageName);
+                        final packageName = packageNames[index];
+                        final packageList = groupedNotifications[packageName]!;
+                        final firstItem = packageList.first;
+                        final meta = _getAppMeta(packageName);
                         final appColor = meta['color'] as Color;
+                        final appDisplayName = firstItem.appName ?? meta['name'] as String;
+                        final isExpanded = _expandedPackages.contains(packageName);
 
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          decoration: BoxDecoration(
-                            color: cardBgColor,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: Colors.grey[900]!),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.1),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(16),
-                            child: IntrinsicHeight(
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  // Left brand accent bar
-                                  Container(
-                                    width: 6,
-                                    color: appColor,
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Parent Card (The App Header) wrapped in Dismissible
+                            Dismissible(
+                              key: ValueKey('parent_$packageName'),
+                              direction: DismissDirection.horizontal,
+                              onDismissed: (direction) async {
+                                print("PURGE_PIPELINE: Swiped Parent Card. Deleting all notifications for package=$packageName");
+                                await (widget.database.delete(widget.database.notifications)
+                                      ..where((t) => t.packageName.equals(packageName)))
+                                    .go();
+                              },
+                              background: _buildSwipeBackground(appColor, isParent: true, alignRight: false),
+                              secondaryBackground: _buildSwipeBackground(appColor, isParent: true, alignRight: true),
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: cardBgColor,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: isExpanded ? appColor.withValues(alpha: 0.6) : Colors.grey[900]!,
                                   ),
-                                  // Main Content
-                                  Expanded(
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(16.0),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          // Package & Time Row
-                                          Row(
-                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  Icon(
-                                                    meta['icon'] as IconData,
-                                                    size: 14,
-                                                    color: appColor,
-                                                  ),
-                                                  const SizedBox(width: 6),
-                                                  Text(
-                                                    item.appName ?? meta['name'] as String,
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                      fontWeight: FontWeight.bold,
-                                                      color: appColor,
-                                                      letterSpacing: 0.2,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.15),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          if (isExpanded) {
+                                            _expandedPackages.remove(packageName);
+                                          } else {
+                                            _expandedPackages.add(packageName);
+                                          }
+                                        });
+                                      },
+                                      child: IntrinsicHeight(
+                                        child: Row(
+                                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                                          children: [
+                                            // Left brand accent bar
+                                            Container(width: 6, color: appColor),
+                                            // Main Header Row
+                                            Expanded(
+                                              child: Padding(
+                                                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
+                                                child: Row(
+                                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                  children: [
+                                                    Row(
+                                                      children: [
+                                                        Container(
+                                                          width: 36,
+                                                          height: 36,
+                                                          decoration: BoxDecoration(
+                                                            color: _appIconsCache[packageName] != null
+                                                                ? surfaceColor
+                                                                : appColor.withValues(alpha: 0.15),
+                                                            borderRadius: BorderRadius.circular(10),
+                                                          ),
+                                                          child: ClipRRect(
+                                                            borderRadius: BorderRadius.circular(8),
+                                                            child: _appIconsCache[packageName] != null
+                                                                ? Image.memory(
+                                                                    _appIconsCache[packageName]!,
+                                                                    width: 36,
+                                                                    height: 36,
+                                                                    fit: BoxFit.cover,
+                                                                    errorBuilder: (_, __, ___) => Icon(
+                                                                      meta['icon'] as IconData,
+                                                                      size: 20,
+                                                                      color: appColor,
+                                                                    ),
+                                                                  )
+                                                                : Icon(
+                                                                    meta['icon'] as IconData,
+                                                                    size: 20,
+                                                                    color: appColor,
+                                                                  ),
+                                                          ),
+                                                        ),
+                                                        const SizedBox(width: 12),
+                                                        Text(
+                                                          appDisplayName,
+                                                          style: const TextStyle(
+                                                            fontSize: 16,
+                                                            fontWeight: FontWeight.bold,
+                                                            color: Colors.white,
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
-                                                  ),
-                                                ],
-                                              ),
-                                              Text(
-                                                _formatTime(item.timestamp),
-                                                style: const TextStyle(
-                                                  fontSize: 11,
-                                                  color: accentTextColor,
+                                                    Row(
+                                                      children: [
+                                                        // Dynamic count badge
+                                                        Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                          decoration: BoxDecoration(
+                                                            color: surfaceColor,
+                                                            borderRadius: BorderRadius.circular(12),
+                                                            border: Border.all(color: appColor.withValues(alpha: 0.4)),
+                                                          ),
+                                                          child: Text(
+                                                            '${packageList.length} ${packageList.length == 1 ? 'notification' : 'notifications'}',
+                                                            style: TextStyle(
+                                                              fontSize: 12,
+                                                              fontWeight: FontWeight.w600,
+                                                              color: appColor,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        const SizedBox(width: 8),
+                                                        Icon(
+                                                          isExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                                                          color: accentTextColor,
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ],
                                                 ),
                                               ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 8),
-                                          // Title
-                                          if (item.title != null && item.title!.isNotEmpty)
-                                            Text(
-                                              item.title!,
-                                              style: const TextStyle(
-                                                fontSize: 15,
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.white,
-                                              ),
                                             ),
-                                          const SizedBox(height: 4),
-                                          // Message
-                                          if (item.message != null && item.message!.isNotEmpty)
-                                            Text(
-                                              item.message!,
-                                              style: TextStyle(
-                                                fontSize: 13,
-                                                color: Colors.grey[300],
-                                                height: 1.3,
-                                              ),
-                                            ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ],
+                                ),
                               ),
                             ),
-                          ),
+
+                            // Child Cards (The Messages) — rendered only when parent is expanded
+                            if (isExpanded)
+                              Column(
+                                children: packageList.map((item) {
+                                  return Dismissible(
+                                    key: ValueKey('child_${item.id}'),
+                                    direction: DismissDirection.horizontal,
+                                    onDismissed: (direction) async {
+                                      print("PURGE_PIPELINE: Swiped Child Card id=${item.id}. Purging row from Drift database.");
+                                      await widget.database.deleteNotificationById(item.id);
+                                    },
+                                    background: _buildSwipeBackground(Colors.red[700]!, isParent: false, alignRight: false),
+                                    secondaryBackground: _buildSwipeBackground(Colors.red[700]!, isParent: false, alignRight: true),
+                                    child: Container(
+                                      margin: const EdgeInsets.only(left: 16, right: 0, bottom: 8),
+                                      decoration: BoxDecoration(
+                                        color: surfaceColor,
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(color: Colors.grey[850]!),
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(14),
+                                        child: Material(
+                                          color: Colors.transparent,
+                                          child: InkWell(
+                                            onTap: () async {
+                                              final pkg = item.packageName;
+                                              if (pkg.isNotEmpty) {
+                                                try {
+                                                  final app = await FlutterDeviceApps.getApp(pkg);
+                                                  if (app != null) {
+                                                    final opened = await FlutterDeviceApps.openApp(pkg);
+                                                    if (opened) {
+                                                      print("PURGE_PIPELINE: Tapped Child Card id=${item.id}. Purging row from Drift database.");
+                                                      await widget.database.deleteNotificationById(item.id);
+                                                    } else {
+                                                      if (!context.mounted) return;
+                                                      _showErrorSnackBar(context, "Could not open application '$pkg'.");
+                                                    }
+                                                  } else {
+                                                    if (!context.mounted) return;
+                                                    _showErrorSnackBar(context, "Application '$pkg' is not currently installed.");
+                                                  }
+                                                } catch (e) {
+                                                  if (!context.mounted) return;
+                                                  _showErrorSnackBar(context, "Could not open this application directly.");
+                                                }
+                                              } else {
+                                                _showErrorSnackBar(context, "Invalid app package identifier.");
+                                              }
+                                            },
+                                            child: Padding(
+                                              padding: const EdgeInsets.all(14.0),
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  // Header: Title & Relative Timestamp
+                                                  Row(
+                                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                    children: [
+                                                      Expanded(
+                                                        child: Text(
+                                                          item.title != null && item.title!.isNotEmpty
+                                                              ? item.title!
+                                                              : appDisplayName,
+                                                          style: const TextStyle(
+                                                            fontSize: 14,
+                                                            fontWeight: FontWeight.bold,
+                                                            color: Colors.white,
+                                                          ),
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow.ellipsis,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 8),
+                                                      Text(
+                                                        _formatTime(item.timestamp),
+                                                        style: const TextStyle(
+                                                          fontSize: 11,
+                                                          color: accentTextColor,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  if (item.message != null && item.message!.isNotEmpty) ...[
+                                                    const SizedBox(height: 6),
+                                                    Text(
+                                                      item.message!,
+                                                      style: TextStyle(
+                                                        fontSize: 13,
+                                                        color: Colors.grey[300],
+                                                        height: 1.35,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                            const SizedBox(height: 6),
+                          ],
                         );
                       },
                     ),
@@ -436,6 +669,56 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildSwipeBackground(Color color, {required bool isParent, required bool alignRight}) {
+    return Container(
+      margin: EdgeInsets.only(
+        left: isParent ? 0 : 16,
+        bottom: 8,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(isParent ? 16 : 14),
+      ),
+      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!alignRight) ...[
+            const Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 24),
+            const SizedBox(width: 8),
+            Text(
+              isParent ? 'Purge All' : 'Dismiss',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ] else ...[
+            Text(
+              isParent ? 'Purge All' : 'Dismiss',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 24),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _showErrorSnackBar(BuildContext context, String message) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: Colors.red[800],
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
