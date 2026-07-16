@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 class OnboardingPermissionScreen extends StatefulWidget {
   final VoidCallback onGrantPressed;
   final VoidCallback onCheckAgain;
+  final bool isBatteryExemption;
 
   const OnboardingPermissionScreen({
     super.key,
     required this.onGrantPressed,
     required this.onCheckAgain,
+    this.isBatteryExemption = false,
   });
 
   @override
@@ -46,6 +48,12 @@ class _OnboardingPermissionScreenState extends State<OnboardingPermissionScreen>
     const primaryColor = Color(0xFF3B82F6);
     const accentColor = Color(0xFF60A5FA);
 
+    final titleText = widget.isBatteryExemption ? 'Ignore Battery Restrictions' : 'Enable Real-Time Capture';
+    final subtitleText = widget.isBatteryExemption
+        ? 'To prevent Android OS from killing background capture when your phone screen is turned off, please exempt OneNotify from battery optimization.'
+        : 'To capture and unify messages from WhatsApp, Gmail, Telegram, and Outlook into your timeline, OneNotify needs Special Notification Access.';
+    final buttonLabel = widget.isBatteryExemption ? 'Allow Battery Exemption' : 'Grant Notification Access';
+
     return Scaffold(
       backgroundColor: backgroundColor,
       body: SafeArea(
@@ -81,29 +89,30 @@ class _OnboardingPermissionScreenState extends State<OnboardingPermissionScreen>
                       child: child,
                     );
                   },
-                  child: const Stack(
+                  child: Stack(
                     alignment: Alignment.center,
                     children: [
                       Icon(
-                        Icons.shield_rounded,
+                        widget.isBatteryExemption ? Icons.battery_charging_full_rounded : Icons.shield_rounded,
                         size: 56,
-                        color: Color(0xFF1D4ED8),
+                        color: const Color(0xFF1D4ED8),
                       ),
-                      Icon(
-                        Icons.notifications_active_rounded,
-                        size: 30,
-                        color: Colors.white,
-                      ),
+                      if (!widget.isBatteryExemption)
+                        const Icon(
+                          Icons.notifications_active_rounded,
+                          size: 30,
+                          color: Colors.white,
+                        ),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 32),
               // Title & Subtitle
-              const Text(
-                'Enable Real-Time Capture',
+              Text(
+                titleText,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 26,
                   fontWeight: FontWeight.w900,
                   color: Colors.white,
@@ -112,7 +121,7 @@ class _OnboardingPermissionScreenState extends State<OnboardingPermissionScreen>
               ),
               const SizedBox(height: 12),
               Text(
-                'To capture and unify messages from WhatsApp, Gmail, Telegram, and Outlook into your timeline, OneNotify needs Special Notification Access.',
+                subtitleText,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 14,
@@ -125,34 +134,63 @@ class _OnboardingPermissionScreenState extends State<OnboardingPermissionScreen>
               Expanded(
                 child: ListView(
                   physics: const BouncingScrollPhysics(),
-                  children: [
-                    _buildStepCard(
-                      stepNumber: '1',
-                      icon: Icons.touch_app_rounded,
-                      title: 'Tap "Grant Notification Access"',
-                      description: 'We will take you directly to Android\'s Special Access screen.',
-                      cardColor: cardColor,
-                      accentColor: accentColor,
-                    ),
-                    const SizedBox(height: 14),
-                    _buildStepCard(
-                      stepNumber: '2',
-                      icon: Icons.toggle_on_rounded,
-                      title: 'Find OneNotify & Turn Switch ON',
-                      description: 'Locate OneNotify in the list and toggle the switch to active.',
-                      cardColor: cardColor,
-                      accentColor: accentColor,
-                    ),
-                    const SizedBox(height: 14),
-                    _buildStepCard(
-                      stepNumber: '3',
-                      icon: Icons.arrow_back_rounded,
-                      title: 'Press Back to Return',
-                      description: 'Once enabled, return right here. We will connect automatically!',
-                      cardColor: cardColor,
-                      accentColor: accentColor,
-                    ),
-                  ],
+                  children: widget.isBatteryExemption
+                      ? [
+                          _buildStepCard(
+                            stepNumber: '1',
+                            icon: Icons.touch_app_rounded,
+                            title: 'Tap "Allow Battery Exemption"',
+                            description: 'We will prompt Android\'s quick whitelist dialog directly.',
+                            cardColor: cardColor,
+                            accentColor: accentColor,
+                          ),
+                          const SizedBox(height: 14),
+                          _buildStepCard(
+                            stepNumber: '2',
+                            icon: Icons.check_circle_outline_rounded,
+                            title: 'Tap "Allow" on the Dialog',
+                            description: 'Confirm the prompt so OneNotify stays active 24/7 in the background.',
+                            cardColor: cardColor,
+                            accentColor: accentColor,
+                          ),
+                          const SizedBox(height: 14),
+                          _buildStepCard(
+                            stepNumber: '3',
+                            icon: Icons.rocket_launch_rounded,
+                            title: 'Continuous Capture Ready',
+                            description: 'Your timeline will now capture alerts even overnight while sleeping.',
+                            cardColor: cardColor,
+                            accentColor: accentColor,
+                          ),
+                        ]
+                      : [
+                          _buildStepCard(
+                            stepNumber: '1',
+                            icon: Icons.touch_app_rounded,
+                            title: 'Tap "Grant Notification Access"',
+                            description: 'We will take you directly to Android\'s Special Access screen.',
+                            cardColor: cardColor,
+                            accentColor: accentColor,
+                          ),
+                          const SizedBox(height: 14),
+                          _buildStepCard(
+                            stepNumber: '2',
+                            icon: Icons.toggle_on_rounded,
+                            title: 'Find OneNotify & Turn Switch ON',
+                            description: 'Locate OneNotify in the list and toggle the switch to active.',
+                            cardColor: cardColor,
+                            accentColor: accentColor,
+                          ),
+                          const SizedBox(height: 14),
+                          _buildStepCard(
+                            stepNumber: '3',
+                            icon: Icons.arrow_back_rounded,
+                            title: 'Press Back to Return',
+                            description: 'Once enabled, return right here. We will connect automatically!',
+                            cardColor: cardColor,
+                            accentColor: accentColor,
+                          ),
+                        ],
                 ),
               ),
               const SizedBox(height: 20),
@@ -170,10 +208,13 @@ class _OnboardingPermissionScreenState extends State<OnboardingPermissionScreen>
                     ),
                   ),
                   onPressed: widget.onGrantPressed,
-                  icon: const Icon(Icons.settings_suggest_rounded, size: 22),
-                  label: const Text(
-                    'Grant Notification Access',
-                    style: TextStyle(
+                  icon: Icon(
+                    widget.isBatteryExemption ? Icons.battery_alert_rounded : Icons.settings_suggest_rounded,
+                    size: 22,
+                  ),
+                  label: Text(
+                    buttonLabel,
+                    style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.3,

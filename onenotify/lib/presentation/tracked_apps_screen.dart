@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_device_apps/flutter_device_apps.dart';
 import 'package:onenotify/database/database.dart';
 
@@ -16,22 +17,49 @@ class TrackedAppsScreen extends StatefulWidget {
   State<TrackedAppsScreen> createState() => _TrackedAppsScreenState();
 }
 
-class _TrackedAppsScreenState extends State<TrackedAppsScreen> {
+class _TrackedAppsScreenState extends State<TrackedAppsScreen> with WidgetsBindingObserver {
+  static const _syncChannel = MethodChannel('com.example.onenotify/sync');
   List<AppInfo> _installedApps = [];
   bool _isLoading = true;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+  bool _isIgnoringBattery = true;
+  bool _hasAttemptedSystemDialog = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadInstalledApps();
+    _checkBatteryStatus();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkBatteryStatus();
+      Future.delayed(const Duration(milliseconds: 500), _checkBatteryStatus);
+    }
+  }
+
+  Future<void> _checkBatteryStatus() async {
+    try {
+      final isIgnoring = await _syncChannel.invokeMethod<bool>('isIgnoringBatteryOptimizations') ?? true;
+      if (mounted) {
+        setState(() {
+          _isIgnoringBattery = isIgnoring;
+        });
+      }
+    } catch (e) {
+      // Safe fallback
+    }
   }
 
   Future<void> _loadInstalledApps() async {
@@ -109,6 +137,74 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> {
                 ],
               ),
             ),
+
+            // Dynamic Battery Optimization Exemption Banner with Settings Fallback
+            if (!_isIgnoringBattery)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Material(
+                  color: const Color(0xFF3B1818),
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () async {
+                      if (!_hasAttemptedSystemDialog) {
+                        setState(() {
+                          _hasAttemptedSystemDialog = true;
+                        });
+                        await _syncChannel.invokeMethod('requestIgnoreBatteryOptimizations');
+                      } else {
+                        await _syncChannel.invokeMethod('openBatteryOptimizationSettings');
+                      }
+                      await Future.delayed(const Duration(milliseconds: 600));
+                      await _checkBatteryStatus();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.6), width: 1.5),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: Color(0xFFF87171), size: 28),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _hasAttemptedSystemDialog
+                                      ? '⚠️ Open Android Battery Settings to Whitelist OneNotify'
+                                      : '⚠️ Battery Exemption Required for Background Tracking.',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _hasAttemptedSystemDialog
+                                      ? 'OEM override blocked the quick dialog. Tap here to open Settings -> OneNotify -> Unrestricted.'
+                                      : 'Tap here to allow OneNotify to run continuously in the background.',
+                                  style: TextStyle(
+                                    color: Colors.grey[300],
+                                    fontSize: 12,
+                                    height: 1.3,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.arrow_forward_ios_rounded, color: Color(0xFFF87171), size: 16),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
 
             // Search Bar
             Padding(

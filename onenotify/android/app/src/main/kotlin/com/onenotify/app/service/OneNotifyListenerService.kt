@@ -1,8 +1,14 @@
 package com.onenotify.app.service
 
 import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.ContentValues
+import android.content.Context
+import android.content.Intent
 import android.database.sqlite.SQLiteDatabase
+import android.os.Build
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -10,6 +16,76 @@ import com.onenotify.app.SyncBus
 import java.io.File
 
 class OneNotifyListenerService : NotificationListenerService() {
+
+    companion object {
+        const val INBOX_CHANNEL_ID = "silent_inbox_channel"
+        const val INBOX_NOTIFICATION_ID = 1001
+        var unreadCount: Int = 0
+
+        fun resetInboxCounter(context: Context) {
+            unreadCount = 0
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            notificationManager?.cancel(INBOX_NOTIFICATION_ID)
+            Log.d("OneNotifyEngine", "LOG 1: Reset silent inbox counter and cancelled persistent notification 1001")
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        createInboxNotificationChannel()
+    }
+
+    private fun createInboxNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val name = "Silent Inbox Tracker"
+            val descriptionText = "Persistent unread notification summary for OneNotify"
+            val importance = NotificationManager.IMPORTANCE_LOW
+            val channel = NotificationChannel(INBOX_CHANNEL_ID, name, importance).apply {
+                description = descriptionText
+                setShowBadge(true)
+            }
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager?.createNotificationChannel(channel)
+            Log.d("OneNotifyEngine", "LOG 1: Created silent inbox channel ($INBOX_CHANNEL_ID)")
+        }
+    }
+
+    private fun updateInboxNotification() {
+        try {
+            val intent = Intent(this, com.example.onenotify.MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            }
+            val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pendingIntent = PendingIntent.getActivity(this, 0, intent, pendingIntentFlags)
+
+            val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(this, INBOX_CHANNEL_ID)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(this)
+            }
+
+            val notification = builder
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("OneNotify Active")
+                .setContentText("📥 $unreadCount Unread Messages")
+                .setOnlyAlertOnce(true)
+                .setOngoing(false)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            notificationManager?.notify(INBOX_NOTIFICATION_ID, notification)
+            Log.d("OneNotifyEngine", "LOG 1: Updated silent inbox notification — unreadCount = $unreadCount")
+        } catch (e: Exception) {
+            Log.e("OneNotifyEngine", "Error posting inbox notification: ${e.message}")
+        }
+    }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -145,6 +221,10 @@ class OneNotifyListenerService : NotificationListenerService() {
             // Using insertOrThrow to catch detailed constraint/syntax errors in our try-catch block
             val rowId = db.insertOrThrow("notifications", null, values)
             Log.d("OneNotifyEngine", "LOG 2: Successfully wrote notification to SQLite. Row ID: $rowId")
+
+            // Update persistent silent inbox counter
+            unreadCount++
+            updateInboxNotification()
 
             // Prune older notifications for this package to prevent database bloat (keep 20 newest)
             try {

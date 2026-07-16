@@ -1,15 +1,18 @@
 package com.example.onenotify
 
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import com.onenotify.app.SyncBus
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import android.content.ComponentName
-import android.content.Intent
-import android.provider.Settings
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
@@ -54,6 +57,71 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
+                "isIgnoringBatteryOptimizations" -> {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+                        val isIgnoring = powerManager?.isIgnoringBatteryOptimizations(packageName) ?: true
+                        result.success(isIgnoring)
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "requestIgnoreBatteryOptimizations" -> {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        try {
+                            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = Uri.parse("package:$packageName")
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            Log.e("OneNotifyEngine", "Failed to request battery optimization exemption: ", e)
+                            try {
+                                val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(fallbackIntent)
+                                result.success(true)
+                            } catch (e2: Exception) {
+                                try {
+                                    val appDetailsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                        data = Uri.parse("package:$packageName")
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    startActivity(appDetailsIntent)
+                                    result.success(true)
+                                } catch (e3: Exception) {
+                                    result.error("BATTERY_EXEMPTION_FAILED", e3.message, null)
+                                }
+                            }
+                        }
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "openBatteryOptimizationSettings" -> {
+                    try {
+                        val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e("OneNotifyEngine", "Failed to open battery optimization settings, attempting App Details fallback: ", e)
+                        try {
+                            val appDetailsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.parse("package:$packageName")
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(appDetailsIntent)
+                            result.success(true)
+                        } catch (e2: Exception) {
+                            Log.e("OneNotifyEngine", "Failed to open application details settings: ", e2)
+                            result.error("OPEN_BATTERY_SETTINGS_FAILED", e2.message, null)
+                        }
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -77,6 +145,16 @@ class MainActivity : FlutterActivity() {
             }
         }
         Log.d("OneNotifyEngine", "LOG 4: SyncBus.onDatabaseUpdated is now ${if (SyncBus.onDatabaseUpdated != null) "REGISTERED" else "NULL"}")
+    }
+
+    override fun onResume() {
+        super.onResume()
+        try {
+            com.onenotify.app.service.OneNotifyListenerService.resetInboxCounter(this)
+            Log.d("OneNotifyEngine", "LOG 4: MainActivity.onResume — reset silent inbox counter and cleared tray notification")
+        } catch (e: Exception) {
+            Log.e("OneNotifyEngine", "Error resetting inbox counter onResume: ${e.message}")
+        }
     }
 
     override fun onDestroy() {
