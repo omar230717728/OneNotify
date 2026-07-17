@@ -34,14 +34,35 @@ class MainActivity : FlutterActivity() {
                     result.success(isGranted)
                 }
                 "requestListenerPermission" -> {
-                    try {
-                        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        startActivity(intent)
+                    val serviceComponent = ComponentName(this, com.onenotify.app.service.OneNotifyListenerService::class.java)
+                    var opened = false
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        try {
+                            val intent = Intent("android.settings.NOTIFICATION_LISTENER_DETAIL_SETTINGS").apply {
+                                putExtra("android.provider.extra.NOTIFICATION_LISTENER_COMPONENT_NAME", serviceComponent.flattenToString())
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            opened = true
+                        } catch (e: Exception) {
+                            Log.w("OneNotify", "Failed to open direct detail settings. Falling back.", e)
+                        }
+                    }
+                    if (!opened) {
+                        try {
+                            val fallbackIntent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(fallbackIntent)
+                            opened = true
+                        } catch (e: Exception) {
+                            Log.e("OneNotify", "Critical: Cannot open any notification settings panel", e)
+                        }
+                    }
+                    if (opened) {
                         result.success(true)
-                    } catch (e: Exception) {
-                        Log.e("OneNotifyEngine", "Failed to open Notification Listener settings: ", e)
-                        result.error("OPEN_SETTINGS_FAILED", e.message, null)
+                    } else {
+                        result.error("OPEN_SETTINGS_FAILED", "Failed to open any settings panel", null)
                     }
                 }
                 "requestRebindService" -> {

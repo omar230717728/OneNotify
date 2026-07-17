@@ -1,8 +1,16 @@
+<p align="center">
+  <img src="onenotify/assets/icon.png" width="100" height="100" alt="OneNotify Logo" />
+</p>
+
 # OneNotify
 
 OneNotify is a high-reliability Android notification tracking application. It features a native Kotlin background service for low-level system notification interception and a cross-platform Flutter presentation layer for rendering, filtering, and managing notification history.
 
-This document serves as the official QA and automated testing playbook (optimized for test suites like **testsprite**). It specifies the under-the-hood architecture, data persistence layers, IPC contracts, and step-by-step execution scripts.
+### 📥 Download & Install
+You can download the pre-compiled Android installer package (APK) directly from this repository:
+👉 **[Download app-release.apk (54.5 MB)](app-release.apk)**
+
+*Note: As this is a custom-built APK, you will need to enable "Install from Unknown Sources" on your Android device settings when installing.*
 
 ---
 
@@ -14,6 +22,17 @@ This document serves as the official QA and automated testing playbook (optimize
 * **Prune on Write Policy:** Limits notification storage to a maximum of 20 entries per application package name to prevent database bloat.
 * **Auto-Purge Housekeeping:** Automatically wipes database entries older than 14 days upon application boot.
 * **Dynamic Localization:** Supports full English LTR, Turkish LTR, and Arabic RTL layout mirroring, including dynamic ICU plural count formats.
+
+---
+
+## 📸 Screenshots
+
+<p align="center">
+  <img src="onenotify/assets/screenshots/screenshot3.jpg" width="190" alt="Permission Onboarding" />
+  <img src="onenotify/assets/screenshots/screenshot4.jpg" width="190" alt="Tracked Applications List" />
+  <img src="onenotify/assets/screenshots/screenshot1.jpg" width="190" alt="Tracked Applications Toggle" />
+  <img src="onenotify/assets/screenshots/screenshot2.jpg" width="190" alt="Notification Timeline" />
+</p>
 
 ---
 
