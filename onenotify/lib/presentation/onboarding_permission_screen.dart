@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:onenotify/l10n/app_localizations.dart';
 
 class OnboardingPermissionScreen extends StatefulWidget {
   final VoidCallback onGrantPressed;
@@ -48,11 +49,12 @@ class _OnboardingPermissionScreenState extends State<OnboardingPermissionScreen>
     const primaryColor = Color(0xFF3B82F6);
     const accentColor = Color(0xFF60A5FA);
 
-    final titleText = widget.isBatteryExemption ? 'Ignore Battery Restrictions' : 'Enable Real-Time Capture';
+    final l10n = AppLocalizations.of(context)!;
+    final titleText = widget.isBatteryExemption ? l10n.ignoreBatteryRestrictions : l10n.enableRealTimeCapture;
     final subtitleText = widget.isBatteryExemption
-        ? 'To prevent Android OS from killing background capture when your phone screen is turned off, please exempt OneNotify from battery optimization.'
-        : 'To capture and unify messages from WhatsApp, Gmail, Telegram, and Outlook into your timeline, OneNotify needs Special Notification Access.';
-    final buttonLabel = widget.isBatteryExemption ? 'Allow Battery Exemption' : 'Grant Notification Access';
+        ? l10n.batteryExemptionSubtitle
+        : l10n.notificationAccessSubtitle;
+    final buttonLabel = widget.isBatteryExemption ? l10n.allowBatteryExemption : l10n.grantNotificationAccess;
 
     return Scaffold(
       backgroundColor: backgroundColor,
@@ -139,8 +141,8 @@ class _OnboardingPermissionScreenState extends State<OnboardingPermissionScreen>
                           _buildStepCard(
                             stepNumber: '1',
                             icon: Icons.touch_app_rounded,
-                            title: 'Tap "Allow Battery Exemption"',
-                            description: 'We will prompt Android\'s quick whitelist dialog directly.',
+                            title: l10n.batteryStep1Title,
+                            description: l10n.batteryStep1Desc,
                             cardColor: cardColor,
                             accentColor: accentColor,
                           ),
@@ -148,8 +150,8 @@ class _OnboardingPermissionScreenState extends State<OnboardingPermissionScreen>
                           _buildStepCard(
                             stepNumber: '2',
                             icon: Icons.check_circle_outline_rounded,
-                            title: 'Tap "Allow" on the Dialog',
-                            description: 'Confirm the prompt so OneNotify stays active 24/7 in the background.',
+                            title: l10n.batteryStep2Title,
+                            description: l10n.batteryStep2Desc,
                             cardColor: cardColor,
                             accentColor: accentColor,
                           ),
@@ -157,8 +159,8 @@ class _OnboardingPermissionScreenState extends State<OnboardingPermissionScreen>
                           _buildStepCard(
                             stepNumber: '3',
                             icon: Icons.rocket_launch_rounded,
-                            title: 'Continuous Capture Ready',
-                            description: 'Your timeline will now capture alerts even overnight while sleeping.',
+                            title: l10n.batteryStep3Title,
+                            description: l10n.batteryStep3Desc,
                             cardColor: cardColor,
                             accentColor: accentColor,
                           ),
@@ -167,8 +169,8 @@ class _OnboardingPermissionScreenState extends State<OnboardingPermissionScreen>
                           _buildStepCard(
                             stepNumber: '1',
                             icon: Icons.touch_app_rounded,
-                            title: 'Tap "Grant Notification Access"',
-                            description: 'We will take you directly to Android\'s Special Access screen.',
+                            title: l10n.notificationStep1Title,
+                            description: l10n.notificationStep1Desc,
                             cardColor: cardColor,
                             accentColor: accentColor,
                           ),
@@ -176,8 +178,8 @@ class _OnboardingPermissionScreenState extends State<OnboardingPermissionScreen>
                           _buildStepCard(
                             stepNumber: '2',
                             icon: Icons.toggle_on_rounded,
-                            title: 'Find OneNotify & Turn Switch ON',
-                            description: 'Locate OneNotify in the list and toggle the switch to active.',
+                            title: l10n.notificationStep2Title,
+                            description: l10n.notificationStep2Desc,
                             cardColor: cardColor,
                             accentColor: accentColor,
                           ),
@@ -185,8 +187,8 @@ class _OnboardingPermissionScreenState extends State<OnboardingPermissionScreen>
                           _buildStepCard(
                             stepNumber: '3',
                             icon: Icons.arrow_back_rounded,
-                            title: 'Press Back to Return',
-                            description: 'Once enabled, return right here. We will connect automatically!',
+                            title: l10n.notificationStep3Title,
+                            description: l10n.notificationStep3Desc,
                             cardColor: cardColor,
                             accentColor: accentColor,
                           ),
@@ -231,9 +233,9 @@ class _OnboardingPermissionScreenState extends State<OnboardingPermissionScreen>
                 ),
                 onPressed: widget.onCheckAgain,
                 icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text(
-                  'I already enabled it — Check status again',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                label: Text(
+                  l10n.checkStatusAgain,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
                 ),
               ),
             ],

@@ -174,6 +174,7 @@ To trigger generation scripts and run the application:
 
 ```powershell
 # 1. Resolve Dart dependencies
+# (run inside directory /onenotify)
 flutter pub get
 
 # 2. Build localizations and database schemas

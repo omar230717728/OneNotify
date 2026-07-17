@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:onenotify/l10n/app_localizations.dart';
 import 'package:onenotify/database/database.dart';
 import 'package:onenotify/presentation/notification_timeline_screen.dart';
 import 'package:onenotify/presentation/tracked_apps_screen.dart';
@@ -77,6 +78,7 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> with Widget
     const surfaceColor = Color(0xFF161E2E);
     const primaryColor = Color(0xFF3B82F6);
 
+    final l10n = AppLocalizations.of(context)!;
     return showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -103,9 +105,9 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> with Widget
                 ),
               ),
               const SizedBox(width: 12),
-              const Text(
-                'Exit OneNotify',
-                style: TextStyle(
+              Text(
+                l10n.exitTitle,
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: 20,
@@ -113,9 +115,9 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> with Widget
               ),
             ],
           ),
-          content: const Text(
-            'Are you sure you want to exit the app?',
-            style: TextStyle(
+          content: Text(
+            l10n.exitConfirm,
+            style: const TextStyle(
               color: Colors.grey,
               fontSize: 15,
             ),
@@ -126,9 +128,9 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> with Widget
                 foregroundColor: Colors.grey[400],
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
-              child: const Text(
-                'Cancel',
-                style: TextStyle(fontWeight: FontWeight.bold),
+              child: Text(
+                l10n.cancel,
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               onPressed: () {
                 Navigator.of(context).pop(false);
@@ -143,9 +145,9 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> with Widget
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
               ),
-              child: const Text(
-                'Exit',
-                style: TextStyle(fontWeight: FontWeight.bold),
+              child: Text(
+                l10n.exit,
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               onPressed: () {
                 Navigator.of(context).pop(true);
@@ -221,16 +223,16 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> with Widget
                   _currentIndex = index;
                 });
               },
-              destinations: const [
+              destinations: [
                 NavigationDestination(
-                  icon: Icon(Icons.notifications_outlined, color: Colors.grey),
-                  selectedIcon: Icon(Icons.notifications_rounded, color: primaryColor),
-                  label: 'Notifications',
+                  icon: const Icon(Icons.notifications_outlined, color: Colors.grey),
+                  selectedIcon: const Icon(Icons.notifications_rounded, color: primaryColor),
+                  label: AppLocalizations.of(context)!.notifications,
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.track_changes_outlined, color: Colors.grey),
-                  selectedIcon: Icon(Icons.track_changes_rounded, color: primaryColor),
-                  label: 'Tracked',
+                  icon: const Icon(Icons.track_changes_outlined, color: Colors.grey),
+                  selectedIcon: const Icon(Icons.track_changes_rounded, color: primaryColor),
+                  label: AppLocalizations.of(context)!.tracked,
                 ),
               ],
             ),

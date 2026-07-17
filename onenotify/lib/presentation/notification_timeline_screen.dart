@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:drift/drift.dart' hide Column;
+import 'package:onenotify/l10n/app_localizations.dart';
 import 'package:onenotify/database/database.dart';
 import 'package:flutter_device_apps/flutter_device_apps.dart';
 import 'package:onenotify/presentation/onboarding_permission_screen.dart';
@@ -77,6 +78,7 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
     _triggerDriftRefresh();
     _checkNotificationAccess();
     _checkBatteryStatus();
+    _autoPurgeOldNotifications();
   }
 
   @override
@@ -166,7 +168,7 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
   }
 
   // Map package name to app name, icon, and specific theme color
-  Map<String, dynamic> _getAppMeta(String packageName) {
+  Map<String, dynamic> _getAppMeta(String packageName, BuildContext context) {
     if (packageName.contains('whatsapp')) {
       return {
         'name': 'WhatsApp',
@@ -205,7 +207,7 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
       };
     } else {
       return {
-        'name': 'App',
+        'name': AppLocalizations.of(context)!.defaultAppLabel,
         'color': Colors.blueGrey,
         'icon': Icons.notifications_none_outlined,
       };
@@ -213,23 +215,121 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
   }
 
   // Format timestamp (BigInt milliseconds) to human-friendly relative string
-  String _formatTime(BigInt timestampMs) {
+  String _formatTime(BigInt timestampMs, BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final dateTime = DateTime.fromMillisecondsSinceEpoch(timestampMs.toInt());
     final difference = DateTime.now().difference(dateTime);
 
     if (difference.isNegative || difference.inSeconds < 10) {
-      return 'Just now';
+      return l10n.justNow;
     } else if (difference.inSeconds < 60) {
-      return '${difference.inSeconds}s ago';
+      return l10n.secondsAgo(difference.inSeconds);
     } else if (difference.inMinutes < 60) {
-      final mins = difference.inMinutes;
-      return '$mins ${mins == 1 ? 'min' : 'mins'} ago';
+      return l10n.minutesAgo(difference.inMinutes);
     } else if (difference.inHours < 24) {
-      final hours = difference.inHours;
-      return '$hours ${hours == 1 ? 'hour' : 'hours'} ago';
+      return l10n.hoursAgo(difference.inHours);
     } else {
-      final days = difference.inDays;
-      return '$days ${days == 1 ? 'day' : 'days'} ago';
+      return l10n.daysAgo(difference.inDays);
+    }
+  }
+
+  Future<void> _autoPurgeOldNotifications() async {
+    try {
+      final cutoffTimestamp = DateTime.now()
+          .subtract(const Duration(days: 14))
+          .millisecondsSinceEpoch;
+
+      // Execute the delete query using Drift's isSmallerThanValue for the BigInt timestamp
+      await (widget.database.delete(widget.database.notifications)
+            ..where((t) => t.timestamp.isSmallerThanValue(BigInt.from(cutoffTimestamp))))
+          .go();
+      print("LOG: Auto-purged notifications older than 14 days.");
+    } catch (e) {
+      print("LOG ERROR: Failed to auto-purge old notifications: $e");
+    }
+  }
+
+  Future<void> _showClearConfirmationDialog(BuildContext context) async {
+    const surfaceColor = Color(0xFF161E2E);
+    const primaryColor = Color(0xFF3B82F6);
+    final l10n = AppLocalizations.of(context)!;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: surfaceColor,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: Colors.grey[850]!, width: 1),
+          ),
+          title: Text(
+            l10n.clearTimelineTitle,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 20,
+            ),
+          ),
+          content: Text(
+            l10n.clearTimelineConfirm,
+            style: const TextStyle(
+              color: Colors.grey,
+              fontSize: 15,
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.grey[400],
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              ),
+              child: Text(
+                l10n.cancel,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              onPressed: () {
+                Navigator.of(context).pop(false);
+              },
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+              ),
+              child: Text(
+                l10n.clearAll,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              onPressed: () {
+                Navigator.of(context).pop(true);
+              },
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      final scaffoldMessenger = ScaffoldMessenger.of(context);
+      try {
+        await widget.database.delete(widget.database.notifications).go();
+        _triggerDriftRefresh();
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text(l10n.timelineCleared),
+            backgroundColor: const Color(0xFF10B981),
+          ),
+        );
+      } catch (e) {
+        print("LOG ERROR: Failed to clear timeline: $e");
+      }
     }
   }
 
@@ -252,84 +352,101 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
     const cardBgColor = Color(0xFF1F293D);
     const accentTextColor = Color(0xFF9CA3AF);
 
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: backgroundColor,
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // High-fidelity modern header
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+      appBar: AppBar(
+        backgroundColor: backgroundColor,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        toolbarHeight: 80,
+        title: Padding(
+          padding: const EdgeInsetsDirectional.only(start: 8.0, top: 12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'OneNotify',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w900,
+                  color: Colors.white,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                l10n.unifiedNotificationCenter,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  color: Colors.grey[400],
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          // Blinking status pill
+          Padding(
+            padding: const EdgeInsets.only(top: 12.0),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: surfaceColor,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.grey[800]!),
+              ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'OneNotify',
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
-                          color: Colors.white,
-                          letterSpacing: -0.5,
-                        ),
+                  FadeTransition(
+                    opacity: _pulseController,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF10B981),
+                        shape: BoxShape.circle,
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Unified Notification Center',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[400],
-                          fontWeight: FontWeight.w400,
-                        ),
-                      ),
-                    ],
-                  ),
-                  // Blinking status pill
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: surfaceColor,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.grey[800]!),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        FadeTransition(
-                          opacity: _pulseController,
-                          child: Container(
-                            width: 8,
-                            height: 8,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF10B981),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'ENGINE ACTIVE',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF10B981),
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ],
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    l10n.active,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF10B981),
+                      letterSpacing: 0.5,
                     ),
                   ),
                 ],
               ),
             ),
-
+          ),
+          const SizedBox(width: 8),
+          Padding(
+            padding: const EdgeInsets.only(top: 12.0),
+            child: IconButton(
+              icon: const Icon(Icons.delete_sweep_rounded, color: Colors.grey, size: 28),
+              tooltip: l10n.clearTimelineTooltip,
+              onPressed: () => _showClearConfirmationDialog(context),
+            ),
+          ),
+          const SizedBox(width: 16),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 8),
             // Dynamic Battery Optimization Exemption Banner with Settings Fallback
             if (!_isIgnoringBattery)
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                padding: const EdgeInsetsDirectional.fromSTEB(20, 0, 20, 12),
                 child: Material(
                   color: const Color(0xFF3B1818),
                   borderRadius: BorderRadius.circular(16),
@@ -363,8 +480,8 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                               children: [
                                 Text(
                                   _hasAttemptedSystemDialog
-                                      ? '⚠️ Open Android Battery Settings to Whitelist OneNotify'
-                                      : '⚠️ Battery Exemption Required for Background Tracking.',
+                                      ? l10n.batteryWarningTitleSettings
+                                      : l10n.batteryWarningTitle,
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w800,
@@ -374,8 +491,8 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                                 const SizedBox(height: 4),
                                 Text(
                                   _hasAttemptedSystemDialog
-                                      ? 'OEM override blocked the quick dialog. Tap here to open Settings -> OneNotify -> Unrestricted.'
-                                      : 'Tap here to allow OneNotify to run continuously in the background.',
+                                      ? l10n.batteryWarningDescSettings
+                                      : l10n.batteryWarningDesc,
                                   style: TextStyle(
                                     color: Colors.grey[300],
                                     fontSize: 12,
@@ -446,19 +563,19 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                                 ),
                               ),
                               const SizedBox(height: 24),
-                              const Text(
-                                'Silent Hub',
-                                style: TextStyle(
+                              Text(
+                                l10n.silentHubTitle,
+                                style: const TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.white,
                                 ),
                               ),
                               const SizedBox(height: 8),
-                              const Text(
-                                'No important notifications captured yet.\nIncoming updates will appear here dynamically.',
+                              Text(
+                                l10n.silentHubDesc,
                                 textAlign: TextAlign.center,
-                                style: TextStyle(
+                                style: const TextStyle(
                                   fontSize: 14,
                                   color: accentTextColor,
                                   height: 1.4,
@@ -494,7 +611,7 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                         final packageName = packageNames[index];
                         final packageList = groupedNotifications[packageName]!;
                         final firstItem = packageList.first;
-                        final meta = _getAppMeta(packageName);
+                        final meta = _getAppMeta(packageName, context);
                         final appColor = meta['color'] as Color;
                         final appDisplayName = firstItem.appName ?? meta['name'] as String;
                         final isExpanded = _expandedPackages.contains(packageName);
@@ -611,7 +728,7 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                                                             border: Border.all(color: appColor.withValues(alpha: 0.4)),
                                                           ),
                                                           child: Text(
-                                                            '${packageList.length} ${packageList.length == 1 ? 'notification' : 'notifications'}',
+                                                            l10n.notificationsCount(packageList.length),
                                                             style: TextStyle(
                                                               fontSize: 12,
                                                               fontWeight: FontWeight.w600,
@@ -653,7 +770,7 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                                     background: _buildSwipeBackground(Colors.red[700]!, isParent: false, alignRight: false),
                                     secondaryBackground: _buildSwipeBackground(Colors.red[700]!, isParent: false, alignRight: true),
                                     child: Container(
-                                      margin: const EdgeInsets.only(left: 16, right: 0, bottom: 8),
+                                      margin: const EdgeInsetsDirectional.only(start: 16, end: 0, bottom: 8),
                                       decoration: BoxDecoration(
                                         color: surfaceColor,
                                         borderRadius: BorderRadius.circular(14),
@@ -676,18 +793,18 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                                                       await widget.database.deleteNotificationById(item.id);
                                                     } else {
                                                       if (!context.mounted) return;
-                                                      _showErrorSnackBar(context, "Could not open application '$pkg'.");
+                                                      _showErrorSnackBar(context, AppLocalizations.of(context)!.couldNotOpenApp(pkg));
                                                     }
                                                   } else {
                                                     if (!context.mounted) return;
-                                                    _showErrorSnackBar(context, "Application '$pkg' is not currently installed.");
+                                                    _showErrorSnackBar(context, AppLocalizations.of(context)!.appNotInstalled(pkg));
                                                   }
                                                 } catch (e) {
                                                   if (!context.mounted) return;
-                                                  _showErrorSnackBar(context, "Could not open this application directly.");
+                                                  _showErrorSnackBar(context, AppLocalizations.of(context)!.couldNotOpenAppDirectly);
                                                 }
                                               } else {
-                                                _showErrorSnackBar(context, "Invalid app package identifier.");
+                                                _showErrorSnackBar(context, AppLocalizations.of(context)!.invalidAppPackage);
                                               }
                                             },
                                             child: Padding(
@@ -715,7 +832,7 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                                                       ),
                                                       const SizedBox(width: 8),
                                                       Text(
-                                                        _formatTime(item.timestamp),
+                                                        _formatTime(item.timestamp, context),
                                                         style: const TextStyle(
                                                           fontSize: 11,
                                                           color: accentTextColor,
@@ -760,9 +877,10 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
   }
 
   Widget _buildSwipeBackground(Color color, {required bool isParent, required bool alignRight}) {
+    final l10n = AppLocalizations.of(context)!;
     return Container(
-      margin: EdgeInsets.only(
-        left: isParent ? 0 : 16,
+      margin: EdgeInsetsDirectional.only(
+        start: isParent ? 0 : 16,
         bottom: 8,
       ),
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -770,7 +888,7 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
         color: color.withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(isParent ? 16 : 14),
       ),
-      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: alignRight ? AlignmentDirectional.centerEnd : AlignmentDirectional.centerStart,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -778,12 +896,12 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
             const Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 24),
             const SizedBox(width: 8),
             Text(
-              isParent ? 'Purge All' : 'Dismiss',
+              isParent ? l10n.purgeAll : l10n.dismiss,
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
           ] else ...[
             Text(
-              isParent ? 'Purge All' : 'Dismiss',
+              isParent ? l10n.purgeAll : l10n.dismiss,
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
             const SizedBox(width: 8),

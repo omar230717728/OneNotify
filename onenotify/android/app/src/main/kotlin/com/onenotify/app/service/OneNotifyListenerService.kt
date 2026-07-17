@@ -17,6 +17,15 @@ import java.io.File
 
 class OneNotifyListenerService : NotificationListenerService() {
 
+    private val SYSTEM_BLACKLIST = setOf(
+        "android",
+        "com.android.systemui",
+        "com.android.settings",
+        "com.google.android.inputmethod.latin",
+        "com.android.providers.downloads",
+        "com.google.android.apps.messaging"
+    )
+
     companion object {
         const val INBOX_CHANNEL_ID = "silent_inbox_channel"
         const val INBOX_NOTIFICATION_ID = 1001
@@ -103,6 +112,12 @@ class OneNotifyListenerService : NotificationListenerService() {
         if (sbn == null) return
 
         val packageName = sbn.packageName
+
+        // Filter: Silently drop system notifications from blacklist
+        if (SYSTEM_BLACKLIST.contains(packageName)) {
+            Log.d("OneNotifyFilter", "Silently dropping system notification from: $packageName")
+            return
+        }
 
         // Log 1: Notification captured
         Log.d("OneNotifyEngine", "LOG 1: Intercepted notification from package: $packageName")

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_device_apps/flutter_device_apps.dart';
+import 'package:onenotify/l10n/app_localizations.dart';
 import 'package:onenotify/database/database.dart';
 
 class TrackedAppsScreen extends StatefulWidget {
@@ -104,6 +105,7 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> with WidgetsBindi
       return name.contains(query) || pkg.contains(query);
     }).toList();
 
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       backgroundColor: backgroundColor,
       body: SafeArea(
@@ -112,13 +114,13 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> with WidgetsBindi
           children: [
             // Header
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+              padding: const EdgeInsetsDirectional.fromSTEB(24, 20, 24, 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Tracked Applications',
-                    style: TextStyle(
+                  Text(
+                    l10n.trackedApplicationsTitle,
+                    style: const TextStyle(
                       fontSize: 26,
                       fontWeight: FontWeight.w900,
                       color: Colors.white,
@@ -127,7 +129,7 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> with WidgetsBindi
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Select which installed apps OneNotify is allowed to intercept and store in real-time.',
+                    l10n.trackedApplicationsDesc,
                     style: TextStyle(
                       fontSize: 13.5,
                       color: Colors.grey[400],
@@ -141,7 +143,7 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> with WidgetsBindi
             // Dynamic Battery Optimization Exemption Banner with Settings Fallback
             if (!_isIgnoringBattery)
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                padding: const EdgeInsetsDirectional.fromSTEB(20, 0, 20, 12),
                 child: Material(
                   color: const Color(0xFF3B1818),
                   borderRadius: BorderRadius.circular(16),
@@ -175,8 +177,8 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> with WidgetsBindi
                               children: [
                                 Text(
                                   _hasAttemptedSystemDialog
-                                      ? '⚠️ Open Android Battery Settings to Whitelist OneNotify'
-                                      : '⚠️ Battery Exemption Required for Background Tracking.',
+                                      ? l10n.batteryWarningTitleSettings
+                                      : l10n.batteryWarningTitle,
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w800,
@@ -186,8 +188,8 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> with WidgetsBindi
                                 const SizedBox(height: 4),
                                 Text(
                                   _hasAttemptedSystemDialog
-                                      ? 'OEM override blocked the quick dialog. Tap here to open Settings -> OneNotify -> Unrestricted.'
-                                      : 'Tap here to allow OneNotify to run continuously in the background.',
+                                      ? l10n.batteryWarningDescSettings
+                                      : l10n.batteryWarningDesc,
                                   style: TextStyle(
                                     color: Colors.grey[300],
                                     fontSize: 12,
@@ -224,7 +226,7 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> with WidgetsBindi
                     });
                   },
                   decoration: InputDecoration(
-                    hintText: 'Search installed apps...',
+                    hintText: l10n.searchHint,
                     hintStyle: TextStyle(color: Colors.grey[500], fontSize: 14),
                     prefixIcon: Icon(Icons.search_rounded, color: Colors.grey[400]),
                     suffixIcon: _searchQuery.isNotEmpty
@@ -261,14 +263,14 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> with WidgetsBindi
                   if (filteredApps.isEmpty) {
                     return Center(
                       child: Text(
-                        _searchQuery.isEmpty ? 'No user apps found.' : 'No apps matching "$_searchQuery"',
+                        _searchQuery.isEmpty ? l10n.noUserAppsFound : l10n.noAppsMatching(_searchQuery),
                         style: TextStyle(color: Colors.grey[400]),
                       ),
                     );
                   }
 
                   return ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                    padding: const EdgeInsetsDirectional.fromSTEB(20, 8, 20, 24),
                     physics: const BouncingScrollPhysics(),
                     itemCount: filteredApps.length,
                     itemBuilder: (context, index) {
@@ -333,7 +335,7 @@ class _TrackedAppsScreenState extends State<TrackedAppsScreen> with WidgetsBindi
                             children: [
                               if (isMonitored)
                                 IconButton(
-                                  tooltip: isMuted ? 'Auto-Dismiss ON (Wiped from Android status bar)' : 'Auto-Dismiss OFF (Normal status bar alerts)',
+                                  tooltip: isMuted ? l10n.autoDismissTooltipOn : l10n.autoDismissTooltipOff,
                                   icon: Container(
                                     padding: const EdgeInsets.all(7),
                                     decoration: BoxDecoration(
