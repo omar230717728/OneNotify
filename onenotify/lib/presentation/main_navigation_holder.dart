@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:onenotify/l10n/app_localizations.dart';
 import 'package:onenotify/database/database.dart';
 import 'package:onenotify/presentation/notification_timeline_screen.dart';
@@ -19,6 +21,8 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> with Widget
   int _currentIndex = 0;
   bool _hasNotificationAccess = true;
   bool _checkedInitialOnboarding = false;
+  bool _isAuthenticating = false;
+  String? _firebaseUid;
   static const _syncChannel = MethodChannel('com.example.onenotify/sync');
 
   @override
@@ -27,6 +31,7 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> with Widget
     WidgetsBinding.instance.addObserver(this);
     _checkNotificationAccess();
     _checkInitialOnboarding();
+    _setupFirebaseAuth();
   }
 
   @override
@@ -71,6 +76,66 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> with Widget
       }
     } catch (e) {
       _checkedInitialOnboarding = true;
+    }
+  }
+
+  Future<void> _cacheUidNatively(String uid) async {
+    try {
+      const authChannel = MethodChannel('com.example.onenotify/auth_bridge');
+      await authChannel.invokeMethod('cacheFirebaseUID', {'uid': uid});
+    } catch (e) {
+      // Ignored
+    }
+  }
+
+  Future<void> _setupFirebaseAuth() async {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) {
+      if (mounted) {
+        setState(() {
+          _firebaseUid = 'test_uid';
+        });
+      }
+      return;
+    }
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      _cacheUidNatively(user.uid);
+      if (mounted) {
+        setState(() {
+          _firebaseUid = user.uid;
+        });
+      }
+    } else {
+      _signInAnonymously();
+    }
+  }
+
+  Future<void> _signInAnonymously() async {
+    if (_isAuthenticating) return;
+    if (mounted) {
+      setState(() {
+        _isAuthenticating = true;
+      });
+    }
+    try {
+      final credential = await FirebaseAuth.instance.signInAnonymously();
+      final uid = credential.user?.uid;
+      if (uid != null) {
+        _cacheUidNatively(uid);
+      }
+      if (mounted) {
+        setState(() {
+          _firebaseUid = uid;
+          _isAuthenticating = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isAuthenticating = false;
+        });
+      }
+      Future.delayed(const Duration(seconds: 3), _signInAnonymously);
     }
   }
 
@@ -170,6 +235,31 @@ class _MainNavigationHolderState extends State<MainNavigationHolder> with Widget
         onCheckAgain: () async {
           await _checkNotificationAccess();
         },
+      );
+    }
+
+    if (_firebaseUid == null || _isAuthenticating) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0B0F19),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF3B82F6)),
+              ),
+              SizedBox(height: 16),
+              Text(
+                'Connecting to Cloud Sync...',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
       );
     }
 

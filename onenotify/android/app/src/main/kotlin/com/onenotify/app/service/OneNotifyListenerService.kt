@@ -12,6 +12,9 @@ import android.os.Build
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import com.google.firebase.FirebaseApp
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FieldValue
 import com.onenotify.app.SyncBus
 import java.io.File
 
@@ -41,6 +44,14 @@ class OneNotifyListenerService : NotificationListenerService() {
 
     override fun onCreate() {
         super.onCreate()
+        try {
+            if (FirebaseApp.getApps(this).isEmpty()) {
+                FirebaseApp.initializeApp(this)
+                Log.d("OneNotifyEngine", "LOG 1: FirebaseApp initialized natively in onCreate")
+            }
+        } catch (e: Exception) {
+            Log.e("OneNotifyEngine", "LOG 1 ERROR: Failed to initialize FirebaseApp natively in onCreate: ${e.message}", e)
+        }
         createInboxNotificationChannel()
     }
 
@@ -237,6 +248,9 @@ class OneNotifyListenerService : NotificationListenerService() {
             val rowId = db.insertOrThrow("notifications", null, values)
             Log.d("OneNotifyEngine", "LOG 2: Successfully wrote notification to SQLite. Row ID: $rowId")
 
+            // Trigger native background Firestore sync
+            syncToFirestoreNatively(rowId, packageName, appName, title, text, timestamp)
+
             // Update persistent silent inbox counter
             unreadCount++
             updateInboxNotification()
@@ -274,6 +288,103 @@ class OneNotifyListenerService : NotificationListenerService() {
             Log.e("OneNotifyEngine", "LOG 2 ERROR: Exception in background writer: ${e.message}", e)
         } finally {
             db?.close()
+        }
+    }
+
+    private fun syncToFirestoreNatively(
+        rowId: Long,
+        packageName: String,
+        appName: String?,
+        title: String,
+        text: String,
+        timestamp: Long
+    ) {
+        try {
+            // Initialize Firebase natively if not already initialized (e.g. after system boot)
+            if (FirebaseApp.getApps(applicationContext).isEmpty()) {
+                FirebaseApp.initializeApp(applicationContext)
+                Log.d("OneNotifyEngine", "NATIVE_CLOUDSYNC: Initialized FirebaseApp natively")
+            }
+
+            val sharedPref = applicationContext.getSharedPreferences("OneNotifyPrefs", Context.MODE_PRIVATE)
+            val uid = sharedPref.getString("firebase_uid", null)
+            if (uid.isNullOrEmpty()) {
+                Log.d("OneNotifyEngine", "NATIVE_CLOUDSYNC: No cached Firebase UID found in SharedPreferences. Skipping sync.")
+                return
+            }
+
+            val firestore = FirebaseFirestore.getInstance()
+            val docId = rowId.toString()
+
+            val notificationData = hashMapOf(
+                "id" to rowId,
+                "packageName" to packageName,
+                "appName" to appName,
+                "title" to title,
+                "message" to text,
+                "localTimestamp" to timestamp,
+                "timestamp" to FieldValue.serverTimestamp()
+            )
+
+            Log.d("OneNotifyEngine", "NATIVE_CLOUDSYNC: Uploading notification $docId for user $uid")
+
+            firestore.collection("users")
+                .document(uid)
+                .collection("notifications")
+                .document(docId)
+                .set(notificationData)
+                .addOnSuccessListener {
+                    try {
+                        Log.d("OneNotifyEngine", "NATIVE_CLOUDSYNC: Successfully synced notification $docId to Firestore")
+                        // Prune Firestore to match local cap (keep 20 newest per package)
+                        pruneFirestoreCollection(uid, packageName)
+                    } catch (e: Exception) {
+                        Log.e("OneNotifyEngine", "NATIVE_CLOUDSYNC ERROR: Exception inside sync success callback: ${e.message}", e)
+                    }
+                }
+                .addOnFailureListener { e ->
+                    Log.e("OneNotifyEngine", "NATIVE_CLOUDSYNC ERROR: Failed to sync to Firestore: ${e.message}", e)
+                }
+
+        } catch (e: Exception) {
+            Log.e("OneNotifyEngine", "NATIVE_CLOUDSYNC ERROR: Exception in native sync: ${e.message}", e)
+        }
+    }
+
+    private fun pruneFirestoreCollection(uid: String, targetPackage: String) {
+        try {
+            val firestore = FirebaseFirestore.getInstance()
+            firestore.collection("users")
+                .document(uid)
+                .collection("notifications")
+                .get()
+                .addOnSuccessListener { querySnapshot ->
+                    try {
+                        val docs = querySnapshot.documents
+                        // Group by packageName
+                        val groups = docs.groupBy { it.getString("packageName") ?: "" }
+                        for ((pkg, groupDocs) in groups) {
+                            if (pkg != targetPackage) continue
+                            // Sort by localTimestamp DESC
+                            val sortedDocs = groupDocs.sortedByDescending { it.getLong("localTimestamp") ?: 0L }
+                            if (sortedDocs.size > 20) {
+                                for (i in 20 until sortedDocs.size) {
+                                    sortedDocs[i].reference.delete()
+                                        .addOnSuccessListener {
+                                            Log.d("OneNotifyEngine", "NATIVE_CLOUDSYNC: Pruned remote doc ${sortedDocs[i].id} for package $pkg")
+                                        }
+                                        .addOnFailureListener { e ->
+                                            Log.e("OneNotifyEngine", "NATIVE_CLOUDSYNC ERROR: Failed to prune remote doc: ${e.message}")
+                                        }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("OneNotifyEngine", "NATIVE_CLOUDSYNC ERROR: Exception inside prune success callback: ${e.message}", e)
+                    }
+                }
+        } catch (e: Exception) {
+            Log.e("OneNotifyEngine", "NATIVE_CLOUDSYNC ERROR: Exception in Firestore pruning: ${e.message}", e)
         }
     }
 

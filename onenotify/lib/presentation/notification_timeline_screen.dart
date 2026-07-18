@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:drift/drift.dart' hide Column;
@@ -56,6 +57,8 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
     // Cache the stream ONCE in initState to prevent StreamBuilder teardown on rebuilds
     _notificationStream = widget.database.watchAllNotifications();
     print("LOG 6: initState — _notificationStream cached from watchAllNotifications()");
+
+
 
     // Blinking dot animation for the "Ingestion Engine: ACTIVE" status indicator
     _pulseController = AnimationController(
@@ -144,6 +147,8 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
     // Also fire a direct one-shot query to verify data exists
     _debugManualQuery();
   }
+
+
 
   /// Debug-only: direct future-based query to verify rows exist in the database.
   Future<void> _debugManualQuery() async {

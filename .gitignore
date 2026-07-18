@@ -1,0 +1,12 @@
+# Security & Credentials
+**/google-services.json
+**/*.keystore
+**/*.jks
+**/local.properties
+**/key.properties
+.env
+.env.*
+
+# IDE config
+.idea/
+.DS_Store

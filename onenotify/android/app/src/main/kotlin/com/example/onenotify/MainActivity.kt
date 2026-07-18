@@ -24,6 +24,27 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
         Log.d("OneNotifyEngine", "LOG 4: MethodChannel registered: $channelName")
+
+        val authChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.example.onenotify/auth_bridge")
+        authChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "cacheFirebaseUID" -> {
+                    val uid = call.argument<String>("uid")
+                    if (uid != null) {
+                        val sharedPref = getSharedPreferences("OneNotifyPrefs", Context.MODE_PRIVATE)
+                        with (sharedPref.edit()) {
+                            putString("firebase_uid", uid)
+                            apply()
+                        }
+                        Log.d("OneNotifyEngine", "Successfully cached Firebase UID natively: $uid")
+                        result.success(true)
+                    } else {
+                        result.error("INVALID_ARGUMENT", "UID is null", null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
         
         methodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
