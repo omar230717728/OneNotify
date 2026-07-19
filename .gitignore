@@ -10,3 +10,4 @@
 # IDE config
 .idea/
 .DS_Store
+.agents/
