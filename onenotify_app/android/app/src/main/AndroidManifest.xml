@@ -17,7 +17,7 @@
     </queries>
 
     <application
-        android:label="onenotify"
+        android:label="Notified"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

@@ -47,3 +47,14 @@ app.*.map.json
 # Local environment variables
 .env
 .env.*
+
+# Firebase CLI cache & build artifacts
+.firebase/
+firebase-debug.log*
+
+# Signing & Credentials
+**/*.keystore
+**/*.jks
+**/key.properties
+**/google-services.json
+**/GoogleService-Info.plist

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'dart:html' as html;
 import 'package:flutter/material.dart';
@@ -27,7 +28,7 @@ class OneNotifyWebApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'OneNotify Web Portal',
+      title: 'Notified Web Portal',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
@@ -106,6 +107,7 @@ class PairingScreen extends StatefulWidget {
 class _PairingScreenState extends State<PairingScreen> {
   String? _pairingCode;
   String? _webUid;
+  String? _errorMessage;
   bool _isInitializing = true;
   StreamSubscription<DocumentSnapshot>? _pairingSubscription;
 
@@ -121,18 +123,28 @@ class _PairingScreenState extends State<PairingScreen> {
     super.dispose();
   }
 
-  Future<void> _startPairingSequence() async {
+  Future<void> _startPairingSequence({bool forceNew = false}) async {
+    setState(() {
+      _errorMessage = null;
+    });
     try {
-      final userCredential = await FirebaseAuth.instance.signInAnonymously();
-      _webUid = userCredential.user?.uid;
-      if (_webUid != null) {
-        await _generateAndRegisterPairingCode();
+      String? uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) {
+        try {
+          final userCredential = await FirebaseAuth.instance.signInAnonymously();
+          uid = userCredential.user?.uid;
+        } catch (e) {
+          print("Anonymous auth note: $e");
+        }
       }
+      _webUid = uid ?? 'web_${DateTime.now().millisecondsSinceEpoch}';
+      await _generateAndRegisterPairingCode(forceNew: forceNew);
     } catch (e) {
+      print("Pairing sequence error: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Connection failed: ${e.toString()}')),
-        );
+        setState(() {
+          _errorMessage = e.toString();
+        });
       }
     } finally {
       if (mounted) {
@@ -143,15 +155,73 @@ class _PairingScreenState extends State<PairingScreen> {
     }
   }
 
-  Future<void> _generateAndRegisterPairingCode() async {
-    final random = Random();
-    final code = (100000 + random.nextInt(900000)).toString();
+  Future<void> _generateAndRegisterPairingCode({bool forceNew = false}) async {
+    String? code;
+    final cachedCode = html.window.localStorage['active_pairing_code'];
+    final cachedExpiryStr = html.window.localStorage['pairing_code_expiry'];
+
+    // Try to reuse a cached code if it hasn't expired
+    bool reusingCachedCode = false;
+    if (!forceNew && cachedCode != null && cachedExpiryStr != null) {
+      try {
+        final expiryDate = DateTime.parse(cachedExpiryStr);
+        if (expiryDate.isAfter(DateTime.now())) {
+          reusingCachedCode = true;
+          code = cachedCode;
+        }
+      } catch (_) {}
+    }
+
+    // Generate a fresh code if we can't reuse one
+    if (!reusingCachedCode || code == null) {
+      // Delete old pairing code documents from Firestore to prevent accumulation
+      final codesToDelete = <String>{
+        if (cachedCode != null) cachedCode,
+        if (_pairingCode != null) _pairingCode!,
+      };
+      for (final oldCode in codesToDelete) {
+        try {
+          await FirebaseFirestore.instance
+              .collection('pairing_codes')
+              .doc(oldCode)
+              .delete();
+        } catch (e) {
+          print("Old pairing code cleanup note ($oldCode): $e");
+        }
+      }
+      try {
+        final querySnap = await FirebaseFirestore.instance
+            .collection('pairing_codes')
+            .where('web_uid', isEqualTo: _webUid)
+            .where('status', isEqualTo: 'pending')
+            .get();
+        for (final doc in querySnap.docs) {
+          try {
+            await doc.reference.delete();
+          } catch (_) {}
+        }
+      } catch (e) {
+        print("Query cleanup note: $e");
+      }
+
+      final random = Random();
+      code = (100000 + random.nextInt(900000)).toString();
+    }
+
+    // ALWAYS write the document to Firestore with expireAt — no conditional branches
+    final expiry = DateTime.now().add(const Duration(minutes: 10));
+    final expireAt = Timestamp.fromDate(expiry);
 
     await FirebaseFirestore.instance.collection('pairing_codes').doc(code).set({
       'web_uid': _webUid,
       'status': 'pending',
       'created_at': FieldValue.serverTimestamp(),
+      'expireAt': expireAt,
     });
+
+    // Cache the code and expiry in browser localStorage
+    html.window.localStorage['active_pairing_code'] = code;
+    html.window.localStorage['pairing_code_expiry'] = expiry.toIso8601String();
 
     if (mounted) {
       setState(() {
@@ -164,13 +234,33 @@ class _PairingScreenState extends State<PairingScreen> {
         .collection('pairing_codes')
         .doc(code)
         .snapshots()
-        .listen((snapshot) {
+        .listen((snapshot) async {
       if (snapshot.exists) {
         final data = snapshot.data();
         if (data != null && data['status'] == 'linked') {
           final mobileUid = data['mobile_uid'] as String?;
           if (mobileUid != null) {
             _pairingSubscription?.cancel();
+
+            // Clean up session storage on pairing success
+            html.window.localStorage.remove('active_pairing_code');
+            html.window.localStorage.remove('pairing_code_expiry');
+
+            // Commit mobile_uid cleanly to browser's native window.localStorage
+            html.window.localStorage['mobile_uid'] = mobileUid;
+            html.window.localStorage['paired_mobile_uid'] = mobileUid;
+
+            // Execute self-destruct operation on the pairing configuration node
+            try {
+              await FirebaseFirestore.instance
+                  .collection('pairing_codes')
+                  .doc(code)
+                  .delete();
+            } catch (e) {
+              print("Pairing token self-destruct error: $e");
+            }
+
+            // Transition onto the timeline layout
             widget.onPairingCompleted(mobileUid);
           }
         }
@@ -252,6 +342,33 @@ class _PairingScreenState extends State<PairingScreen> {
                         Text('Connecting securely...', style: TextStyle(color: Colors.grey)),
                       ],
                     )
+                  else if (_errorMessage != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.redAccent),
+                      ),
+                      child: Column(
+                        children: [
+                          const Icon(Icons.error_outline, color: Colors.redAccent, size: 32),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Firebase Error: $_errorMessage',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Ensure Anonymous Auth is enabled in Firebase Console & Firestore rules allow reads/writes.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.grey, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ]
                   else if (_pairingCode != null) ...[
                     // Custom pairing code digits display
                     Container(
@@ -323,7 +440,7 @@ class _PairingScreenState extends State<PairingScreen> {
                       setState(() {
                         _isInitializing = true;
                       });
-                      _startPairingSequence();
+                      _startPairingSequence(forceNew: true);
                     },
                     icon: const Icon(Icons.refresh_rounded, size: 18),
                     label: const Text('Generate New Code'),
@@ -396,6 +513,36 @@ class TimelineDashboardScreen extends StatefulWidget {
 
 class _TimelineDashboardScreenState extends State<TimelineDashboardScreen> {
   final Set<String> _expandedPackages = {};
+  StreamSubscription? _configsSubscription;
+  Map<String, Map<String, dynamic>> _appConfigs = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _configsSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.mobileUid)
+        .collection('app_configs')
+        .snapshots()
+        .listen((snapshot) {
+      final Map<String, Map<String, dynamic>> newConfigs = {};
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        newConfigs[doc.id] = data;
+      }
+      if (mounted) {
+        setState(() {
+          _appConfigs = newConfigs;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _configsSubscription?.cancel();
+    super.dispose();
+  }
 
   Future<void> _clearAllNotifications() async {
     final confirmed = await showDialog<bool>(
@@ -473,47 +620,79 @@ class _TimelineDashboardScreenState extends State<TimelineDashboardScreen> {
   }
 
   Map<String, dynamic> _getAppMeta(String packageName) {
+    // Check if we have dynamic config synced from the device
+    final config = _appConfigs[packageName];
+    Color? dynamicColor;
+    Widget? dynamicIconWidget;
+
+    if (config != null) {
+      final hexColor = config['dominantColor'] as String?;
+      if (hexColor != null && hexColor.startsWith('#')) {
+        try {
+          dynamicColor = Color(int.parse(hexColor.replaceFirst('#', '0xFF')));
+        } catch (_) {}
+      }
+      final base64Icon = config['iconBase64'] as String?;
+      if (base64Icon != null && base64Icon.isNotEmpty) {
+        try {
+          dynamicIconWidget = Image.memory(
+            base64Decode(base64Icon),
+            width: 20,
+            height: 20,
+            fit: BoxFit.contain,
+          );
+        } catch (_) {}
+      }
+    }
+
     if (packageName.contains('whatsapp')) {
       return {
         'name': 'WhatsApp',
-        'color': const Color(0xFF25D366),
+        'color': dynamicColor ?? const Color(0xFF25D366),
         'icon': Icons.message_outlined,
+        'iconWidget': dynamicIconWidget,
       };
     } else if (packageName.contains('telegram')) {
       return {
         'name': 'Telegram',
-        'color': const Color(0xFF50A2E3),
+        'color': dynamicColor ?? const Color(0xFF50A2E3),
         'icon': Icons.send_rounded,
+        'iconWidget': dynamicIconWidget,
       };
     } else if (packageName.contains('gmail') || packageName.contains('email')) {
       return {
         'name': 'Gmail',
-        'color': const Color(0xFFEA4335),
+        'color': dynamicColor ?? const Color(0xFFEA4335),
         'icon': Icons.email_outlined,
+        'iconWidget': dynamicIconWidget,
       };
     } else if (packageName.contains('outlook')) {
       return {
         'name': 'Outlook',
-        'color': const Color(0xFF0078D4),
+        'color': dynamicColor ?? const Color(0xFF0078D4),
         'icon': Icons.mark_as_unread_outlined,
+        'iconWidget': dynamicIconWidget,
       };
     } else if (packageName.contains('youtube')) {
       return {
         'name': 'YouTube',
-        'color': const Color(0xFFFF0000),
+        'color': dynamicColor ?? const Color(0xFFFF0000),
         'icon': Icons.play_circle_fill_rounded,
+        'iconWidget': dynamicIconWidget,
       };
     } else if (packageName.contains('google')) {
       return {
         'name': 'Google',
-        'color': const Color(0xFF4285F4),
+        'color': dynamicColor ?? const Color(0xFF4285F4),
         'icon': Icons.search_rounded,
+        'iconWidget': dynamicIconWidget,
       };
     } else {
       return {
         'name': packageName.split('.').last.toUpperCase(),
-        'color': const Color(0xFF3B82F6),
+        'color': dynamicColor ?? const Color(0xFF3B82F6),
         'icon': Icons.notifications_none_rounded,
+        'iconWidget': dynamicIconWidget,
       };
     }
   }
@@ -560,7 +739,7 @@ class _TimelineDashboardScreenState extends State<TimelineDashboardScreen> {
                     ),
                     const SizedBox(width: 14),
                     const Text(
-                      'OneNotify',
+                      'Notified Web Portal',
                       style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.w900,
@@ -781,6 +960,15 @@ class _TimelineDashboardScreenState extends State<TimelineDashboardScreen> {
                                 border: Border.all(
                                   color: isExpanded ? appColor.withValues(alpha: 0.5) : Colors.grey[900]!,
                                 ),
+                                boxShadow: isExpanded
+                                    ? [
+                                        BoxShadow(
+                                          color: appColor.withValues(alpha: 0.08),
+                                          blurRadius: 24,
+                                          offset: const Offset(0, 8),
+                                        ),
+                                      ]
+                                    : null,
                               ),
                               child: Column(
                                 children: [
@@ -809,11 +997,13 @@ class _TimelineDashboardScreenState extends State<TimelineDashboardScreen> {
                                                   color: appColor.withValues(alpha: 0.15),
                                                   borderRadius: BorderRadius.circular(10),
                                                 ),
-                                                child: Icon(
-                                                  meta['icon'] as IconData,
-                                                  color: appColor,
-                                                  size: 20,
-                                                ),
+                                                child: meta['iconWidget'] != null
+                                                    ? meta['iconWidget'] as Widget
+                                                    : Icon(
+                                                        meta['icon'] as IconData,
+                                                        color: appColor,
+                                                        size: 20,
+                                                      ),
                                               ),
                                               const SizedBox(width: 16),
                                               Text(

@@ -15,6 +15,12 @@ import android.util.Log
 import com.google.firebase.FirebaseApp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FieldValue
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
+import android.util.Base64
+import java.io.ByteArrayOutputStream
 import com.onenotify.app.SyncBus
 import java.io.File
 
@@ -255,10 +261,56 @@ class OneNotifyListenerService : NotificationListenerService() {
             unreadCount++
             updateInboxNotification()
 
+            // 14-day automatic expiration cleanup
+            try {
+                val cutoff = System.currentTimeMillis() - (14L * 24 * 60 * 60 * 1000)
+                val expiredIds = mutableListOf<Long>()
+                val selectExpiredQuery = "SELECT id FROM notifications WHERE timestamp < ?"
+                val cursor = db.rawQuery(selectExpiredQuery, arrayOf(cutoff.toString()))
+                if (cursor != null) {
+                    while (cursor.moveToNext()) {
+                        expiredIds.add(cursor.getLong(0))
+                    }
+                    cursor.close()
+                }
+
+                if (expiredIds.isNotEmpty()) {
+                    // Delete from local SQLite
+                    val idPlaceholders = expiredIds.joinToString(",") { "?" }
+                    val deleteQuery = "DELETE FROM notifications WHERE id IN ($idPlaceholders)"
+                    val bindArgs = expiredIds.map { it.toString() }.toTypedArray()
+                    db.execSQL(deleteQuery, bindArgs)
+                    Log.d("OneNotifyEngine", "Kotlin Service: Expired ${expiredIds.size} records older than 14 days locally.")
+
+                    // Delete from Firestore
+                    val sharedPref = applicationContext.getSharedPreferences("OneNotifyPrefs", Context.MODE_PRIVATE)
+                    val uid = sharedPref.getString("firebase_uid", null)
+                    if (!uid.isNullOrEmpty()) {
+                        val firestore = FirebaseFirestore.getInstance()
+                        for (expiredId in expiredIds) {
+                            firestore.collection("users")
+                                .document(uid)
+                                .collection("notifications")
+                                .document(expiredId.toString())
+                                .delete()
+                                .addOnSuccessListener {
+                                    Log.d("OneNotifyEngine", "NATIVE_CLOUDSYNC: Successfully deleted expired notification $expiredId from Firestore")
+                                }
+                                .addOnFailureListener { e ->
+                                    Log.e("OneNotifyEngine", "NATIVE_CLOUDSYNC ERROR: Failed to delete expired notification $expiredId: ${e.message}")
+                                }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("OneNotifyEngine", "Kotlin Service ERROR: Failed to auto-purge 14-day expired notifications: ${e.message}", e)
+            }
+
             // Prune older notifications for this package to prevent database bloat (keep 20 newest)
             try {
-                val pruneQuery = """
-                    DELETE FROM notifications 
+                val idsToPrune = mutableListOf<Long>()
+                val selectPruneQuery = """
+                    SELECT id FROM notifications 
                     WHERE package_name = ? 
                     AND id NOT IN (
                         SELECT id FROM notifications 
@@ -267,8 +319,42 @@ class OneNotifyListenerService : NotificationListenerService() {
                         LIMIT 20
                     )
                 """.trimIndent()
-                db.execSQL(pruneQuery, arrayOf(packageName, packageName))
-                Log.d("OneNotifyEngine", "Kotlin Service: Pruned database for package $packageName to keep only the 20 newest records.")
+                val cursor = db.rawQuery(selectPruneQuery, arrayOf(packageName, packageName))
+                if (cursor != null) {
+                    while (cursor.moveToNext()) {
+                        idsToPrune.add(cursor.getLong(0))
+                    }
+                    cursor.close()
+                }
+
+                if (idsToPrune.isNotEmpty()) {
+                    // Delete from local SQLite
+                    val idPlaceholders = idsToPrune.joinToString(",") { "?" }
+                    val deleteQuery = "DELETE FROM notifications WHERE id IN ($idPlaceholders)"
+                    val bindArgs = idsToPrune.map { it.toString() }.toTypedArray()
+                    db.execSQL(deleteQuery, bindArgs)
+                    Log.d("OneNotifyEngine", "Kotlin Service: Pruned ${idsToPrune.size} records locally for package $packageName.")
+
+                    // Delete from Firestore
+                    val sharedPref = applicationContext.getSharedPreferences("OneNotifyPrefs", Context.MODE_PRIVATE)
+                    val uid = sharedPref.getString("firebase_uid", null)
+                    if (!uid.isNullOrEmpty()) {
+                        val firestore = FirebaseFirestore.getInstance()
+                        for (purgedId in idsToPrune) {
+                            firestore.collection("users")
+                                .document(uid)
+                                .collection("notifications")
+                                .document(purgedId.toString())
+                                .delete()
+                                .addOnSuccessListener {
+                                    Log.d("OneNotifyEngine", "NATIVE_CLOUDSYNC: Successfully deleted pruned notification $purgedId from Firestore")
+                                }
+                                .addOnFailureListener { e ->
+                                    Log.e("OneNotifyEngine", "NATIVE_CLOUDSYNC ERROR: Failed to delete pruned notification $purgedId: ${e.message}")
+                                }
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 Log.e("OneNotifyEngine", "Kotlin Service ERROR: Failed to prune notifications for package $packageName: ${e.message}", e)
             }
@@ -311,6 +397,12 @@ class OneNotifyListenerService : NotificationListenerService() {
             if (uid.isNullOrEmpty()) {
                 Log.d("OneNotifyEngine", "NATIVE_CLOUDSYNC: No cached Firebase UID found in SharedPreferences. Skipping sync.")
                 return
+            }
+
+            // Sync app config / icon if not already done
+            val cachedIcons = sharedPref.getStringSet("uploaded_icons", setOf()) ?: setOf()
+            if (!cachedIcons.contains(packageName)) {
+                syncAppConfigNatively(uid, packageName)
             }
 
             val firestore = FirebaseFirestore.getInstance()
@@ -415,5 +507,98 @@ class OneNotifyListenerService : NotificationListenerService() {
 
     private fun isPackageMonitored(packageName: String): Boolean {
         return getMonitoredStatus(packageName).isMonitored
+    }
+
+    private fun syncAppConfigNatively(uid: String, packageName: String) {
+        try {
+            val pm = applicationContext.packageManager
+            val appIcon = pm.getApplicationIcon(packageName)
+            val (base64Icon, dominantColor) = convertDrawableToBase64(appIcon)
+
+            val configData = hashMapOf(
+                "packageName" to packageName,
+                "iconBase64" to base64Icon,
+                "dominantColor" to dominantColor
+            )
+
+            val firestore = FirebaseFirestore.getInstance()
+            firestore.collection("users")
+                .document(uid)
+                .collection("app_configs")
+                .document(packageName)
+                .set(configData)
+                .addOnSuccessListener {
+                    try {
+                        val sharedPref = applicationContext.getSharedPreferences("OneNotifyPrefs", Context.MODE_PRIVATE)
+                        val cachedIcons = sharedPref.getStringSet("uploaded_icons", setOf()) ?: setOf()
+                        val newCachedIcons = cachedIcons.toMutableSet()
+                        newCachedIcons.add(packageName)
+                        sharedPref.edit().putStringSet("uploaded_icons", newCachedIcons).apply()
+                        Log.d("OneNotifyEngine", "NATIVE_CLOUDSYNC: Uploaded app config/icon for $packageName")
+                    } catch (e: Exception) {
+                        Log.e("OneNotifyEngine", "NATIVE_CLOUDSYNC ERROR: Failed to save cached icon state: ${e.message}")
+                    }
+                }
+                .addOnFailureListener { e ->
+                    Log.e("OneNotifyEngine", "NATIVE_CLOUDSYNC ERROR: Failed to upload app config: ${e.message}")
+                }
+        } catch (e: Exception) {
+            Log.e("OneNotifyEngine", "NATIVE_CLOUDSYNC ERROR: Exception syncAppConfigNatively for $packageName: ${e.message}", e)
+        }
+    }
+
+    private fun convertDrawableToBase64(drawable: Drawable): Pair<String, String> {
+        val bitmap = if (drawable is BitmapDrawable) {
+            drawable.bitmap
+        } else {
+            val width = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 48
+            val height = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 48
+            val b = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(b)
+            drawable.setBounds(0, 0, canvas.width, canvas.height)
+            drawable.draw(canvas)
+            b
+        }
+
+        // Scale to exactly 48x48
+        val scaledBitmap = Bitmap.createScaledBitmap(bitmap, 48, 48, true)
+        
+        // Extract dominant color
+        val hexColor = getDominantColor(scaledBitmap)
+
+        // Compress to PNG
+        val outputStream = ByteArrayOutputStream()
+        scaledBitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+        val bytes = outputStream.toByteArray()
+        
+        // Encode to Base64
+        val base64String = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        
+        return Pair(base64String, hexColor)
+    }
+
+    private fun getDominantColor(bitmap: Bitmap): String {
+        val smallBitmap = Bitmap.createScaledBitmap(bitmap, 10, 10, false)
+        var sumRed = 0
+        var sumGreen = 0
+        var sumBlue = 0
+        var count = 0
+        for (x in 0 until 10) {
+            for (y in 0 until 10) {
+                val color = smallBitmap.getPixel(x, y)
+                val alpha = (color shr 24) and 0xff
+                // Skip highly transparent pixels
+                if (alpha > 100) {
+                    sumRed += (color shr 16) and 0xff
+                    sumGreen += (color shr 8) and 0xff
+                    sumBlue += color and 0xff
+                    count++
+                }
+            }
+        }
+        val avgRed = if (count > 0) sumRed / count else 128
+        val avgGreen = if (count > 0) sumGreen / count else 128
+        val avgBlue = if (count > 0) sumBlue / count else 128
+        return String.format("#%02X%02X%02X", avgRed, avgGreen, avgBlue)
     }
 }

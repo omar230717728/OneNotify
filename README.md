@@ -1,208 +1,321 @@
 <p align="center">
-  <img src="onenotify/assets/icon.png" width="100" height="100" alt="OneNotify Logo" />
+  <img src="onenotify_app/assets/icon.png" width="100" height="100" alt="Notified Logo" />
 </p>
 
-# OneNotify
+# Notified
 
-OneNotify is a high-reliability Android notification tracking application. It features a native Kotlin background service for low-level system notification interception and a cross-platform Flutter presentation layer for rendering, filtering, and managing notification history.
+**Notified** is a cross-platform notification management system that intercepts Android notifications in real time and streams them to a web dashboard on your PC via Firebase. It consists of two applications:
+
+| Component | Description | Tech Stack |
+| :--- | :--- | :--- |
+| **Notified Mobile** (`onenotify_app/`) | Android app that captures device notifications and syncs them to the cloud | Flutter + Kotlin + SQLite (Drift) + Firebase |
+| **Notified Web Portal** (`onenotify_web/`) | Browser dashboard to view, manage, and search notifications from any computer | Flutter Web + Firebase Hosting + Firestore |
 
 ### 📥 Download & Install
-You can download the pre-compiled Android installer package (APK) directly from this repository:
 👉 **[Download app-release.apk (54.5 MB)](app-release.apk)**
 
-*Note: As this is a custom-built APK, you will need to enable "Install from Unknown Sources" on your Android device settings when installing.*
+*Note: You will need to enable "Install from Unknown Sources" on your Android device settings when installing.*
+
+🌐 **Web Portal:** [https://onenotify-7593c.web.app](https://onenotify-7593c.web.app)
 
 ---
 
-## 📋 Features & Capabilities
+## 🚀 Quick Start (Pair & Test in 2 Minutes)
 
-* **Onboarding Permission Gates:** Locks down features and prompts for Android system settings permissions if Notification Access is not granted.
-* **Battery Optimization Survival:** Requests Android battery settings exclusions to guarantee background service continuity when screen is locked or idle.
-* **System Noise Filter:** Blacklists core Android telemetry packages to prevent system notifications cluttering the timeline.
-* **Prune on Write Policy:** Limits notification storage to a maximum of 20 entries per application package name to prevent database bloat.
-* **Auto-Purge Housekeeping:** Automatically wipes database entries older than 14 days upon application boot.
-* **Dynamic Localization:** Supports full English LTR, Turkish LTR, and Arabic RTL layout mirroring, including dynamic ICU plural count formats.
-
----
-
-## 📸 Screenshots
-
-<p align="center">
-  <img src="onenotify/assets/screenshots/screenshot3.jpg" width="190" alt="Permission Onboarding" />
-  <img src="onenotify/assets/screenshots/screenshot4.jpg" width="190" alt="Tracked Applications List" />
-  <img src="onenotify/assets/screenshots/screenshot1.jpg" width="190" alt="Tracked Applications Toggle" />
-  <img src="onenotify/assets/screenshots/screenshot2.jpg" width="190" alt="Notification Timeline" />
-</p>
+1. **Install the APK** on your Android phone.
+2. **Grant permissions** — the app will walk you through enabling Notification Access and disabling Battery Optimization.
+3. **Choose which apps to track** on the Tracked Apps screen (e.g., WhatsApp, Gmail, Telegram).
+4. **Open the Web Portal** on your PC at [https://onenotify-7593c.web.app](https://onenotify-7593c.web.app).
+5. **A 6-digit pairing code** will appear on screen. It expires after 10 minutes.
+6. **On your phone**, tap the 🔗 "Link to PC" icon in the timeline app bar and enter the code.
+7. **Done!** Notifications captured on your phone will now appear on the web dashboard in real time.
 
 ---
 
-## ⚙️ Deep Technical Architecture Spec
+## 📱 Mobile App Features
+
+### Onboarding Permission Gates
+On first launch, the app presents a step-by-step onboarding screen that checks and requests two critical Android permissions:
+- **Notification Listener Access** — required for the background service to intercept notifications from other apps.
+- **Battery Optimization Exemption** — required to keep the background service alive when the screen is locked or the device is idle.
+
+The app will not proceed until both permissions are granted.
+
+### Notification Timeline
+The main screen displays a real-time, scrollable timeline of all captured notifications, grouped by application:
+- **Accordion Layout** — Notifications are grouped under collapsible app headers. Tap a header to expand and see all messages from that app.
+- **App Icons & Colors** — Each app gets its own themed color and icon (WhatsApp → green, Telegram → blue, Gmail → red, etc.).
+- **Notification Count Badges** — Each header shows the total count of captured notifications.
+- **Pull-to-Refresh** — Swipe down to force a database re-read.
+- **Swipe-to-Dismiss** — Swipe a single notification to delete it, or swipe an app header to delete ALL notifications from that app.
+- **Tap to Open App** — Tap any notification to launch the originating app directly.
+- **Status Indicator** — A pulsing green dot labeled "Ingestion Engine: ACTIVE" confirms the background service is running.
+
+### Background Notification Capture
+A native Kotlin `NotificationListenerService` runs in the background and:
+- Intercepts every system notification posted to the Android notification bar.
+- **Deduplicates** — skips notifications where both the title and message match the most recent entry for the same app.
+- **Filters system noise** — silently drops notifications from Android system packages (`com.android.systemui`, `com.android.settings`, etc.).
+- **Prunes on write** — after each insertion, keeps only the 20 most recent notifications per app.
+- Writes captured data to a shared SQLite database and signals the Flutter UI to refresh instantly via a `MethodChannel` bridge.
+
+### Cloud Sync to Firebase
+The mobile app syncs every captured notification to Firestore under the user's anonymous Firebase Auth UID:
+- Path: `users/{uid}/notifications/{docId}`
+- Each notification includes: `packageName`, `title`, `message`, `timestamp`, and app metadata (icon bytes, dominant color).
+- App metadata (icon + color) is also synced to `users/{uid}/app_configs/{packageName}` so the web portal can render real app icons.
+
+### Tracked Apps Management
+A dedicated "Tracked Apps" screen lets you:
+- See a list of all installed apps on your device.
+- Toggle tracking ON/OFF per app — only tracked apps will have their notifications captured.
+- Search and filter the app list.
+
+### Pairing with Web Portal
+From the timeline screen, tap the 🔗 link icon in the app bar to open the pairing dialog:
+- Enter the 6-digit code displayed on the web portal.
+- The app validates the code against Firestore, checking that it exists and hasn't expired (10-minute TTL).
+- On success, the pairing document is updated to `status: "linked"` with the mobile UID, triggering the web portal to transition to the dashboard.
+
+### Auto-Purge & Housekeeping
+- On every app launch, notifications older than **14 days** are automatically deleted from the local database.
+- When notifications are deleted locally (via swipe), the corresponding Firestore documents are also deleted to keep cloud and local data in sync.
+
+### Localization
+The app supports three languages with full layout mirroring:
+- **English** (LTR)
+- **Turkish** (LTR)
+- **Arabic** (RTL) — including proper RTL icon flipping and ICU plural formatting
+
+---
+
+## 🌐 Web Portal Features
+
+### Pairing Screen
+When you first open the web portal, you see a pairing screen with:
+- A randomly generated **6-digit pairing code** displayed in large, spaced digits.
+- A **10-minute countdown timer** — the code expires after 10 minutes and auto-regenerates.
+- Step-by-step instructions on how to enter the code on the mobile app.
+- The code is persisted in `localStorage` — refreshing the page within the TTL window reuses the same code instead of creating a new one.
+- A Firestore real-time listener watches the pairing document — the moment the mobile app enters the code and marks it as "linked", the web portal automatically transitions to the dashboard.
+
+### Notification Dashboard
+Once paired, the web portal displays a live dashboard showing all notifications synced from your phone:
+- **Real-time streaming** — Firestore `snapshots()` listener pushes new notifications instantly to the UI.
+- **Grouped by app** — Notifications are organized under collapsible app headers, similar to the mobile app.
+- **App icons from device** — The web portal downloads the actual app icon (base64-encoded) and dominant color that was synced from the mobile device via `app_configs`.
+- **Search & Filter** — A search bar at the top lets you filter notifications by app name, title, or message content.
+- **Delete individual notifications** — Swipe or click to delete a single notification from the cloud.
+- **Clear All** — A "Clear All" button deletes every notification from Firestore with a confirmation dialog.
+- **Unpair** — An "Unpair" button disconnects the web session, clears `localStorage`, and returns to the pairing screen.
+- **Dark theme** — The entire portal uses a premium dark UI with a blue accent palette, glassmorphism card effects, and smooth animations.
+
+### Hosting & Deployment
+The web portal is hosted on **Firebase Hosting** at [https://onenotify-7593c.web.app](https://onenotify-7593c.web.app).
+- Cache-busting headers (`Cache-Control: no-cache, no-store, must-revalidate`) are configured for all JS and HTML files to ensure users always get the latest version.
+- SPA routing is enabled — all paths rewrite to `index.html`.
+
+---
+
+## 🔗 How Pairing Works (End-to-End Flow)
 
 ```
-      +-------------------------------------------------------+
-      |                  Android OS Notification              |
-      +---------------------------+---------------------------+
-                                  | (System Interception)
-                                  v
-      +-------------------------------------------------------+
-      |             OneNotifyListenerService                  |  <--- (Native Kotlin Engine)
-      +---------------------------+---------------------------+
-                                  |
-                                  +--> deduplicates & applies blacklists
-                                  |
-                                  +--> database.insertOrThrow()
-                                  |    (Journal Mode: DELETE, Timeout: 5000ms)
-                                  |
-                                  v
-                     +--------------------------+
-                     |  Shared onenotify.db     |
-                     +------------+-------------+
-                                  ^
-                                  | (Reactive Queries / Streams)
-                                  |
-      +---------------------------+---------------------------+
-      |                        SyncBus                        |  <--- (In-Memory Kotlin Singleton)
-      +---------------------------+---------------------------+
-                                  |
-                                  v (MainActivity.onCreate / Handler)
-      +-------------------------------------------------------+
-      |                     MethodChannel                     |  <--- (com.example.onenotify/sync)
-      +---------------------------+---------------------------+
-                                  |
-                                  v (refresh signal)
-      +-------------------------------------------------------+
-      |                 Flutter Presentation                  |  <--- (Dart / Drift Database UI)
-      +-------------------------------------------------------+
+┌─────────────────────┐              ┌──────────────────────┐
+│   Web Portal (PC)   │              │  Mobile App (Phone)  │
+└────────┬────────────┘              └──────────┬───────────┘
+         │                                      │
+    1. Signs in anonymously                     │
+    2. Generates 6-digit code                   │
+    3. Writes to Firestore:                     │
+       /pairing_codes/{code}                    │
+       { web_uid, status: "pending",            │
+         expireAt: now + 10min }                │
+    4. Listens to doc snapshots                 │
+         │                                      │
+         │         ┌─────────────────┐          │
+         │         │  User reads     │          │
+         │         │  code on screen │          │
+         │         │  & types it on  │          │
+         │         │  mobile app     │          │
+         │         └─────────────────┘          │
+         │                                      │
+         │                              5. Signs in anonymously
+         │                              6. Reads /pairing_codes/{code}
+         │                              7. Validates expireAt > now
+         │                              8. Updates: status → "linked"
+         │                                 + mobile_uid
+         │                                      │
+    9. Snapshot fires with                      │
+       status == "linked"                       │
+   10. Saves mobile_uid to                      │
+       localStorage                             │
+   11. Deletes pairing doc                      │
+   12. Transitions to Dashboard ────────────────┘
 ```
-
-### 1. The Shared Data Layer (SQLite + Drift)
-The application utilizes a shared SQLite database file accessed concurrently by two separate runtime environments in the same process:
-* **Write Path (Kotlin):** The background service (`OneNotifyListenerService.kt`) writes intercepted notifications directly using native Android `SQLiteDatabase` APIs.
-* **Read/Delete Path (Dart):** The Flutter UI reads, streams, and deletes notifications using the `drift` reactive query builder.
-
-#### ⚠️ POSIX Locking & Journal Configuration
-To prevent same-PID shared memory (`.shm`) conflicts and POSIX file lock clashes between the native JVM library (`libsqlite.so`) and the Dart library (`libsqlite3.so`), the database is configured with:
-* **Journal Mode:** Explicitly set to `DELETE` (PRAGMA `journal_mode = DELETE`). Write-Ahead Logging (WAL) is disabled to prevent background thread lockouts.
-* **Busy Timeout:** Configured to `5000` milliseconds on both ends to queue concurrent operations cleanly.
-* **Database File Path:** `/data/data/com.example.onenotify/files/onenotify.db` (Mapped to Kotlin's `context.filesDir` and Dart's resolved parent folder).
-
-### 2. The Inter-Process Communication (IPC) & Real-Time Sync
-Because both engines run in different execution bounds (the native background process container vs. the Dart VM isolate thread pool), real-time UI synchronization bypasses system broadcasts (which can be deferred by Android doze rules) in favor of a direct memory bridge:
-1. **Database Update Signal:** After a successful SQLite database insert, the native background service calls `SyncBus.onDatabaseUpdated?.invoke()`.
-2. **SyncBus Callback Registry:** `SyncBus` is a Kotlin singleton object that bridges callbacks to the `MainActivity` instance.
-3. **UI Thread Dispatcher:** The `MainActivity` captures the event, wraps it in `Handler(Looper.getMainLooper()).post` to ensure thread safety, and forwards it to Flutter via a `MethodChannel` call.
-4. **Dart Cache Invalidation:** The Flutter timeline screen receives the `'refresh'` call and triggers `notifyUpdates()` on the Drift database instance to re-emit fresh streams.
 
 ---
 
-## 🛡️ Business Logic & Data Constraints
+## ⚙️ Architecture
 
-QA suites should validate system behavior against the following strict constraints:
-1. **Deduplication Check:** Native Kotlin code checks the most recent notification for the package. If both the `title` and `message` match the incoming notification, the write is skipped.
-2. **System Noise Blacklist:** Notifications originating from the following package names must be silently dropped:
-   * `android`
-   * `com.android.systemui`
-   * `com.android.settings`
-   * `com.google.android.inputmethod.latin`
-   * `com.android.providers.downloads`
-   * `com.google.android.apps.messaging`
-3. **Prune on Write Policy:** Every successful insertion triggers a clean-up query keeping only the **20 most recent** records per app package name.
-4. **Housekeeping Guard:** Upon booting the timeline screen, an auto-purge query deletes all database rows where `timestamp` is older than **14 days**.
+```
+       +-------------------------------------------------------+
+       |                  Android OS Notification              |
+       +---------------------------+---------------------------+
+                                   | (System Interception)
+                                   v
+       +-------------------------------------------------------+
+       |             OneNotifyListenerService                  |  <--- (Native Kotlin Engine)
+       +---------------------------+---------------------------+
+                                   |
+                                   +--> deduplicates & applies blacklists
+                                   |
+                                   +--> database.insertOrThrow()
+                                   |    (Journal Mode: DELETE, Timeout: 5000ms)
+                                   |
+                                   +--> Syncs to Firestore cloud
+                                   |
+                                   v
+              +--------------------------+     +--------------------+
+              |  Local onenotify.db      |     |  Firestore Cloud   |
+              +------------+-------------+     +--------+-----------+
+                           ^                            ^
+                           | (Drift Streams)            | (Snapshots)
+                           |                            |
+       +-------------------+-------------+   +----------+-----------+
+       |         Mobile Flutter UI       |   |   Web Portal UI      |
+       +---------------------------------+   +----------------------+
+```
+
+### Shared Data Layer (SQLite + Drift)
+- **Write Path (Kotlin):** The background service writes to SQLite using native Android APIs.
+- **Read Path (Dart):** Flutter reads and streams data using the Drift reactive query builder.
+- **Journal Mode:** `DELETE` (WAL disabled to prevent same-PID locking conflicts between Kotlin and Dart SQLite libraries).
+- **Busy Timeout:** 5000ms on both ends.
+
+### Real-Time IPC (MethodChannel)
+1. After each database insert, the Kotlin service calls `SyncBus.onDatabaseUpdated?.invoke()`.
+2. `SyncBus` is a Kotlin singleton that bridges callbacks to `MainActivity`.
+3. `MainActivity` dispatches to the main thread via `Handler(Looper.getMainLooper()).post` and calls Flutter via `MethodChannel`.
+4. Flutter receives the `'refresh'` call and tells Drift to re-emit fresh data streams.
 
 ---
 
-## 🔌 MethodChannel API Matrix
+## 📂 Project Structure
 
-The platform communications are handled via the channel identifier **`com.example.onenotify/sync`**. Below is the API matrix defining the expectations for mock engines and test suites:
-
-| Method String | Arguments | Returns | Native Action |
-| :--- | :--- | :--- | :--- |
-| `isListenerPermissionGranted` | None | `Boolean` | Checks Android system settings (`enabled_notification_listeners`) for service approval. |
-| `requestListenerPermission` | None | `Boolean` | Fires an Activity Intent to open Android's Special Access Notification settings screen. |
-| `requestRebindService` | None | `Boolean` | Re-binds the `NotificationListenerService` handler dynamically to force background activation. |
-| `isIgnoringBatteryOptimizations` | None | `Boolean` | Checks if the application is whitelisted under Android OS Power Manager restrictions. |
-| `requestIgnoreBatteryOptimizations` | None | `Boolean` | Triggers a prompt to exempt the app from battery limits. Falls back to settings intents on OEMs. |
-| `openBatteryOptimizationSettings` | None | `Boolean` | Opens the Android Power optimization list directly for manual whitelisting. |
-
-*Note: App launching from timeline cards is handled on the Dart side using the `flutter_device_apps` library via `FlutterDeviceApps.openApp(packageName)`.*
+```
+OneNotify/
+├── README.md
+├── app-release.apk                    # Pre-built Android installer
+├── .gitignore
+│
+├── onenotify_app/                     # Mobile App
+│   ├── pubspec.yaml
+│   ├── lib/
+│   │   ├── main.dart                  # App entry point
+│   │   ├── database/
+│   │   │   ├── database.dart          # Drift schema & PRAGMA config
+│   │   │   └── database.g.dart        # Generated SQLite entities
+│   │   ├── l10n/
+│   │   │   ├── app_en.arb             # English translations
+│   │   │   ├── app_tr.arb             # Turkish translations
+│   │   │   └── app_ar.arb             # Arabic translations
+│   │   └── presentation/
+│   │       ├── main_navigation_holder.dart        # Bottom nav & PopScope back gate
+│   │       ├── notification_timeline_screen.dart   # Main timeline + cloud sync + pairing
+│   │       ├── onboarding_permission_screen.dart   # Permission setup wizard
+│   │       └── tracked_apps_screen.dart            # App whitelist toggles
+│   └── android/
+│       └── app/src/main/kotlin/
+│           ├── com/example/onenotify/
+│           │   └── MainActivity.kt                # MethodChannel handler
+│           └── com/onenotify/app/
+│               ├── SyncBus.kt                     # Decoupled callback singleton
+│               └── service/
+│                   ├── BootReceiver.kt            # System boot auto-start
+│                   └── OneNotifyListenerService.kt # Native notification interceptor
+│
+├── onenotify_web/                     # Web Portal
+│   ├── pubspec.yaml
+│   ├── firebase.json                  # Hosting config (cache headers, SPA rewrites)
+│   ├── .firebaserc                    # Firebase project ID
+│   ├── lib/
+│   │   └── main.dart                  # Pairing screen + Timeline dashboard (single file)
+│   └── web/
+│       └── index.html                 # HTML shell with meta tags
+```
 
 ---
 
-## 🧪 E2E Testing & Simulation Playbook
+## 🛠️ Development Setup
 
-### 1. Simulating Notifications via ADB
-You can push mock notification events directly to the Android System notification queue using `adb shell cmd notification`. The background interception engine will capture it only if the package name is whitelisted in `monitored_apps`.
+### Prerequisites
+- Flutter SDK (3.44+)
+- Android Studio or VS Code with Flutter extension
+- Firebase CLI (`npm install -g firebase-tools`)
+- A Firebase project with **Anonymous Auth** and **Cloud Firestore** enabled
 
-```bash
-# Step 1: Ensure the app is whitelisted (run inside app UI or insert directly into database)
-# Step 2: Fire simulated notification into the status bar queue:
-adb shell cmd notification post -s "TestTag" "com.whatsapp" "John Doe" "Hey! This is a test message"
-```
-
-### 2. UI State Verification Matrix
-* **Accordion States:** Check list components. When a package header card is tapped, list expansion is toggled (`_expandedPackages`). Verify that tapping exposes the child message list.
-* **Notification Count Badge:** Verify that counts match the ICU plural syntax rules:
-  * **English:** `=1{1 notification} other{{count} notifications}`
-  * **Turkish:** `=1{1 bildirim} other{{count} bildirim}`
-  * **Arabic:** `=1{إشعار واحد} =2{إشعاران} few{{count} إشعارات} other{{count} إشعار}`
-* **Swiping Interactivity (Swipe-To-Dismiss):**
-  * **Child Card Swipe:** Swiping a child message card deletes that specific row (`deleteNotificationById`). Verify that the item list animations trigger and database count decreases by 1.
-  * **Parent Header Swipe:** Swiping the main package card runs a query removing all rows matching the package name. Verify that the whole accordion category disappears and all rows are removed.
-* **Localization Check:** Set system language to Arabic. Verify:
-  * Layout flow changes from LTR to RTL.
-  * Icons (like arrow_forward/expand_more) point in RTL direction.
-  * Spacers and margins match dynamic `EdgeInsetsDirectional` configurations.
-
----
-
-## 📂 Directory Map & Setup
-
-### Folder Tree
-```
-onenotify/
-├── l10n.yaml                   # Localization compile config
-├── pubspec.yaml                # App dependencies and setup
-├── lib/
-│   ├── main.dart               # Entry point
-│   ├── database/
-│   │   ├── database.dart       # Drift schema & PRAGMA configurations
-│   │   └── database.g.dart     # Generated SQLite entities
-│   ├── l10n/
-│   │   ├── app_en.arb          # English translations
-│   │   ├── app_tr.arb          # Turkish translations
-│   │   ├── app_ar.arb          # Arabic translations
-│   │   └── app_localizations.dart # Generated localization class
-│   └── presentation/
-│       ├── main_navigation_holder.dart    # App scaffolding, PopScope back gate
-│       ├── notification_timeline_screen.dart # Main timeline interface, swipe dismissals
-│       ├── onboarding_permission_screen.dart # Setup onboarding steps UI
-│       └── tracked_apps_screen.dart       # App whitelist options
-└── android/
-    └── app/src/main/kotlin/
-        ├── com/example/onenotify/
-        │   └── MainActivity.kt            # Platform channels handler
-        └── com/onenotify/app/
-            ├── SyncBus.kt                 # Decoupled callback manager
-            └── service/
-                ├── BootReceiver.kt        # System boot startup
-                └── OneNotifyListenerService.kt # Native interception engine
-```
-
-### Environment Execution
-To trigger generation scripts and run the application:
+### Mobile App
 
 ```powershell
-# 1. Resolve Dart dependencies
-# (run inside directory /onenotify)
+cd onenotify_app
+
+# 1. Install dependencies
 flutter pub get
 
-# 2. Build localizations and database schemas
+# 2. Generate localizations and database code
 flutter gen-l10n
 dart run build_runner build --delete-conflicting-outputs
 
-# 3. Launch unit tests
-flutter test
-
-# 4. Build/run application
+# 3. Run on connected device
 flutter run
 ```
+
+### Web Portal
+
+```powershell
+cd onenotify_web
+
+# 1. Install dependencies
+flutter pub get
+
+# 2. Run locally (hot reload)
+flutter run -d chrome
+
+# 3. Build for production
+flutter build web --release
+
+# 4. Deploy to Firebase Hosting
+firebase deploy --only hosting
+```
+
+---
+
+## 🛡️ Security Notes
+
+- **`firebase.json` and `.firebaserc`** are safe to commit — they contain only project structure and hosting rules, not credentials.
+- **`google-services.json`** (Android) and **`.env`** files are excluded via `.gitignore`.
+- Firebase web API keys visible in the source code are **public by design** — they are restricted by Firestore Security Rules.
+- To prevent abuse, enforce **Firestore Security Rules** requiring `request.auth != null` on all reads/writes, and consider enabling **Firebase App Check**.
+
+---
+
+## 🧪 Testing
+
+### Simulating Notifications via ADB
+
+```bash
+adb shell cmd notification post -s "TestTag" "com.whatsapp" "John Doe" "Hey! This is a test message"
+```
+
+### UI Verification Checklist
+- [ ] Accordion groups expand/collapse on tap
+- [ ] Notification count badges match actual entries
+- [ ] Swipe-to-dismiss deletes individual notifications
+- [ ] Swiping a parent header deletes all notifications for that app
+- [ ] Pull-to-refresh re-fetches data
+- [ ] Pairing code appears on web portal
+- [ ] Mobile app accepts code and transitions to "linked"
+- [ ] Web dashboard shows notifications in real time after pairing
+- [ ] "Clear All" on web portal deletes all cloud notifications
+- [ ] "Unpair" disconnects the session
+- [ ] Arabic locale switches layout to RTL with correct icon mirroring

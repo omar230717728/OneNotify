@@ -1,0 +1,23 @@
+{
+  "projectId": "7dbce808-ac1b-4f33-ac89-a9636ab4a4c6",
+  "type": "frontend",
+  "name": "Dashboard Transition — setting paired_mobile_uid in localStorage transitions to timeline dashboard",
+  "planSteps": [
+    {
+      "type": "action",
+      "description": "Navigate to https://onenotify-7593c.web.app."
+    },
+    {
+      "type": "action",
+      "description": "Set window.localStorage.setItem('paired_mobile_uid', 'test_mobile_uid_device_101') and reload the page."
+    },
+    {
+      "type": "assertion",
+      "description": "The initial 'Pair Web Companion' card is no longer visible."
+    },
+    {
+      "type": "assertion",
+      "description": "The timeline dashboard header displaying the text 'Linked PC Timeline' is rendered along with the 'Unpair' button and the 'Clear All' button."
+    }
+  ]
+}

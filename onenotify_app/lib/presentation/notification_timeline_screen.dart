@@ -84,6 +84,7 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
     _checkNotificationAccess();
     _checkBatteryStatus();
     _autoPurgeOldNotifications();
+    _reconcileDeletionsWithCloud();
   }
 
   @override
@@ -104,6 +105,7 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
       _checkNotificationAccess();
       _checkBatteryStatus();
       Future.delayed(const Duration(milliseconds: 500), _checkBatteryStatus);
+      _reconcileDeletionsWithCloud();
     }
   }
 
@@ -294,11 +296,23 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                             final docRef = FirebaseFirestore.instance.collection('pairing_codes').doc(code);
                             final docSnap = await docRef.get();
 
-                            if (!docSnap.exists) {
+                            final data = docSnap.data();
+                            final Timestamp? expireAt = data?['expireAt'] as Timestamp?;
+                            final bool isExpired = expireAt != null && expireAt.toDate().isBefore(DateTime.now());
+
+                            if (!docSnap.exists || isExpired) {
                               setState(() {
                                 isLoading = false;
-                                errorText = 'Invalid code, please try again';
+                                errorText = 'This code has expired or is invalid. Please refresh your browser.';
                               });
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('This code has expired or is invalid. Please refresh your browser.'),
+                                    backgroundColor: Color(0xFFEF4444),
+                                  ),
+                                );
+                              }
                               return;
                             }
 
@@ -424,6 +438,45 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
     }
   }
 
+  Future<void> _reconcileDeletionsWithCloud() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final uid = user.uid;
+
+      // 1. Fetch all notification document IDs from Firestore
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('notifications')
+          .get();
+
+      final cloudIds = snapshot.docs.map((doc) => int.tryParse(doc.id)).whereType<int>().toSet();
+
+      // 2. Fetch all local notifications from Drift
+      final localNotifications = await widget.database.select(widget.database.notifications).get();
+
+      // 3. Find IDs present locally but missing from Firestore
+      final idsToDeleteLocally = <int>[];
+      for (final local in localNotifications) {
+        if (!cloudIds.contains(local.id)) {
+          idsToDeleteLocally.add(local.id);
+        }
+      }
+
+      if (idsToDeleteLocally.isNotEmpty) {
+        print("PURGE_PIPELINE: Found ${idsToDeleteLocally.length} notifications deleted in cloud. Syncing deletions to local SQLite.");
+        // 4. Batch delete from local Drift database
+        await (widget.database.delete(widget.database.notifications)
+              ..where((t) => t.id.isIn(idsToDeleteLocally)))
+            .go();
+        _triggerDriftRefresh();
+      }
+    } catch (e) {
+      print("LOG ERROR: Failed to reconcile deletions with cloud: $e");
+    }
+  }
+
   Future<void> _showClearConfirmationDialog(BuildContext context) async {
     const surfaceColor = Color(0xFF161E2E);
     const primaryColor = Color(0xFF3B82F6);
@@ -502,6 +555,22 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
             backgroundColor: const Color(0xFF10B981),
           ),
         );
+        // Dynamic Cloud Deletion Sync for All Notifications
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          try {
+            final query = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .collection('notifications')
+                .get();
+            final batch = FirebaseFirestore.instance.batch();
+            for (var doc in query.docs) {
+              batch.delete(doc.reference);
+            }
+            await batch.commit();
+          } catch (_) {}
+        }
       } catch (e) {
         print("LOG ERROR: Failed to clear timeline: $e");
       }
@@ -542,7 +611,7 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
-                'OneNotify',
+                'Notified',
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.w900,
@@ -812,6 +881,23 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                                 await (widget.database.delete(widget.database.notifications)
                                       ..where((t) => t.packageName.equals(packageName)))
                                     .go();
+                                // Dynamic Cloud Deletion Sync for Package Group
+                                final user = FirebaseAuth.instance.currentUser;
+                                if (user != null) {
+                                  try {
+                                    final query = await FirebaseFirestore.instance
+                                        .collection('users')
+                                        .doc(user.uid)
+                                        .collection('notifications')
+                                        .where('packageName', isEqualTo: packageName)
+                                        .get();
+                                    final batch = FirebaseFirestore.instance.batch();
+                                    for (var doc in query.docs) {
+                                      batch.delete(doc.reference);
+                                    }
+                                    await batch.commit();
+                                  } catch (_) {}
+                                }
                               },
                               background: _buildSwipeBackground(appColor, isParent: true, alignRight: false),
                               secondaryBackground: _buildSwipeBackground(appColor, isParent: true, alignRight: true),
@@ -950,6 +1036,17 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                                     onDismissed: (direction) async {
                                       print("PURGE_PIPELINE: Swiped Child Card id=${item.id}. Purging row from Drift database.");
                                       await widget.database.deleteNotificationById(item.id);
+                                      // Dynamic Cloud Deletion Sync
+                                      final user = FirebaseAuth.instance.currentUser;
+                                      if (user != null) {
+                                        FirebaseFirestore.instance
+                                            .collection('users')
+                                            .doc(user.uid)
+                                            .collection('notifications')
+                                            .doc(item.id.toString())
+                                            .delete()
+                                            .catchError((_) {});
+                                      }
                                     },
                                     background: _buildSwipeBackground(Colors.red[700]!, isParent: false, alignRight: false),
                                     secondaryBackground: _buildSwipeBackground(Colors.red[700]!, isParent: false, alignRight: true),
@@ -975,6 +1072,17 @@ class _NotificationTimelineScreenState extends State<NotificationTimelineScreen>
                                                     if (opened) {
                                                       print("PURGE_PIPELINE: Tapped Child Card id=${item.id}. Purging row from Drift database.");
                                                       await widget.database.deleteNotificationById(item.id);
+                                                      // Dynamic Cloud Deletion Sync
+                                                      final user = FirebaseAuth.instance.currentUser;
+                                                      if (user != null) {
+                                                        FirebaseFirestore.instance
+                                                            .collection('users')
+                                                            .doc(user.uid)
+                                                            .collection('notifications')
+                                                            .doc(item.id.toString())
+                                                            .delete()
+                                                            .catchError((_) {});
+                                                      }
                                                     } else {
                                                       if (!context.mounted) return;
                                                       _showErrorSnackBar(context, AppLocalizations.of(context)!.couldNotOpenApp(pkg));

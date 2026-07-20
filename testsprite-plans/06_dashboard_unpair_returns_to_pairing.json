@@ -1,0 +1,19 @@
+{
+  "projectId": "7dbce808-ac1b-4f33-ac89-a9636ab4a4c6",
+  "type": "frontend",
+  "name": "Dashboard Unpair — clicking Unpair clears session and returns to pairing screen",
+  "planSteps": [
+    {
+      "type": "action",
+      "description": "Navigate to https://onenotify-7593c.web.app after setting window.localStorage.setItem('paired_mobile_uid', 'test_mobile_uid_device_101') so the Timeline Dashboard is active."
+    },
+    {
+      "type": "action",
+      "description": "Click the 'Unpair' button in the top navigation bar."
+    },
+    {
+      "type": "assertion",
+      "description": "The Timeline Dashboard view is removed, window.localStorage.getItem('paired_mobile_uid') is null, and the 'Pair Web Companion' card with a 6-digit pairing code is rendered once again."
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "projectId": "7dbce808-ac1b-4f33-ac89-a9636ab4a4c6",
+  "type": "frontend",
+  "name": "Pairing Screen — page refresh retains cached pairing code from localStorage",
+  "planSteps": [
+    {
+      "type": "action",
+      "description": "Navigate to https://onenotify-7593c.web.app and wait for the 6-digit numeric pairing code to appear on the screen."
+    },
+    {
+      "type": "action",
+      "description": "Note the exact 6 digits currently displayed inside the pairing code box, then refresh the browser page (reload)."
+    },
+    {
+      "type": "assertion",
+      "description": "After the page reloads, the displayed 6-digit pairing code is identical to the code shown before refreshing, verifying session reuse from localStorage."
+    }
+  ]
+}
