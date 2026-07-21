@@ -32,6 +32,28 @@
 
 ---
 
+## 🖼️ Screenshots & Interface Preview
+
+### Mobile Application
+<p align="center">
+  <img src="onenotify_app/assets/screenshots/permission_screen.jpg" width="250" alt="Permission Gate Wizard" />
+  &nbsp;&nbsp;
+  <img src="onenotify_app/assets/screenshots/tracked_apps.jpg" width="250" alt="Tracked Applications Selection" />
+  &nbsp;&nbsp;
+  <img src="onenotify_app/assets/screenshots/mobile_timeline.jpg" width="250" alt="Unified Notification Center Timeline" />
+</p>
+
+### Web Companion Portal
+<p align="center">
+  <img src="onenotify_app/assets/screenshots/web_pairing.png" width="600" alt="Pairing Web Companion Screen" />
+</p>
+
+<p align="center">
+  <img src="onenotify_app/assets/screenshots/web_dashboard.png" width="800" alt="Web Notifications Feed Dashboard" />
+</p>
+
+---
+
 ## 📱 Mobile App Features
 
 ### Onboarding Permission Gates

@@ -23,3 +23,5 @@
 }
 -keep class * extends androidx.room.RoomDatabase { *; }
 -dontwarn net.sqlcipher.**
+-dontwarn com.google.android.play.core.**
+
